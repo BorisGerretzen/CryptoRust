@@ -6,5 +6,5 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bn = "0.4.3"
-rand = "0.3.23"
+substrate-bn = "0.6.0"
+rand = "0.8.5"
