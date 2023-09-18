@@ -1,92 +1,125 @@
-mod access_tree_node;
+mod access_tree;
+mod models;
+mod abe_attribute;
+mod invalid_argument_error;
 
 extern crate rabe_bn;
 extern crate rand;
 
-use std::ops::Mul;
+use std::collections::{HashMap};
 use rand::Rng;
 use rabe_bn::{Group, Fr, G1, G2, pairing, Gt};
-use rabe_bn::arith::U256;
-use access_tree_node::TreeOperator;
-use crate::access_tree_node::{GetAttributes};
-use crate::access_tree_node::AccessTree::Operator;
-use crate::access_tree_node::AccessTree::Leaf;
+use access_tree::TreeOperator;
+use crate::abe_attribute::AbeAttribute;
+use crate::access_tree::{AccessTree, AssignValues, GetAttributes, MinimalSetFinder};
+use crate::access_tree::AccessTree::Operator;
+use crate::access_tree::AccessTree::Leaf;
+use crate::invalid_argument_error::InvalidAttributesError;
+use crate::models::{AbePublicKey, AbeMasterKey, AbeSecretKey, AbeCipherText};
+
+fn setup<R: Rng + ?Sized>(access_tree: AccessTree, g: G1, g2: G2, rng: &mut R) -> (AbePublicKey, AbeMasterKey) {
+    let attributes = access_tree.get_attributes();
+
+    let mut small_t = HashMap::new();
+    for i in 0..attributes.len() {
+        small_t.insert(attributes[i].name.clone(), rng.gen());
+    }
+
+    let alpha: Fr = rng.gen();
+    let pair = pairing(g, g2);
+    let y = pair.pow(alpha);
+
+    let mut big_t = HashMap::new();
+    for i in 0..attributes.len() {
+        big_t.insert(attributes[i].name.clone(), g * small_t[&attributes[i].name]);
+    }
+
+    (AbePublicKey {
+        map: pair,
+        g1: g,
+        g2,
+        y,
+        big_t,
+    },
+     AbeMasterKey {
+         alpha,
+         small_t,
+     })
+}
+
+fn keygen<R: Rng + ?Sized>(attributes: Vec<AbeAttribute>, public_key: AbePublicKey, master_key: AbeMasterKey, rng: &mut R) -> AbeSecretKey {
+    let r = rng.gen();
+    let d_0 = public_key.g2 * (master_key.alpha - r);
+
+    let arr_d = attributes.iter().map(|a| (a.name.clone(), public_key.g2 * (r * master_key.small_t[&a.name].inverse().unwrap()))).collect::<HashMap<String, G2>>();
+
+    AbeSecretKey {
+        d_0,
+        arr_d,
+    }
+}
+
+fn encrypt<R: Rng + ?Sized>(message: Gt, public_key: AbePublicKey, access_tree: AccessTree, rng: &mut R) -> AbeCipherText {
+    let s = rng.gen();
+    let c_0 = public_key.g1 * s;
+    let c_1 = message * public_key.y.pow(s);
+    let filled_tree = access_tree.assign_values(s, None, rng);
+    let c_j = filled_tree.get_attributes().iter().map(|x| (x.name.clone(), public_key.big_t[&x.name] * x.value.unwrap())).collect::<HashMap<String, G1>>();
+
+    AbeCipherText {
+        access_tree: Box::new(filled_tree),
+        c_0,
+        c_1,
+        arr_c: c_j,
+    }
+}
+
+fn decrypt(cipher_text: AbeCipherText, secret_key: AbeSecretKey) -> Result<Gt, InvalidAttributesError> {
+    let original_set = secret_key.arr_d.iter().map(|(name, _)| AbeAttribute::new(name)).collect::<Vec<AbeAttribute>>();
+    let minimal_set = cipher_text.access_tree.find_minimal_set(&original_set)?;
+
+    let mut product = None;
+    for (name, d) in secret_key.arr_d.iter().filter(|(name, _)| minimal_set.contains(&AbeAttribute::new(name))) {
+        if product == None {
+            product = Some(pairing(cipher_text.arr_c[name], *d));
+        } else {
+            product = Some(product.unwrap() * pairing(cipher_text.arr_c[name], *d));
+        }
+    }
+
+    let egsga = pairing(cipher_text.c_0, secret_key.d_0) * product.unwrap();
+    let m_prime = cipher_text.c_1 * egsga.inverse();
+
+    Ok(m_prime)
+}
 
 fn main() {
     let rng = &mut rand::thread_rng();
 
-    let g:G1 = rng.gen();
-    let g2:G2 = rng.gen();
-
-
     let tree = Operator {
         operator: TreeOperator::Or,
         left: Box::from(Operator {
-            operator: TreeOperator::Or,
-            left: Box::from(Leaf { attribute: "A".to_string(), value: None }),
-            right: Box::from(Leaf { attribute: "B".to_string(), value: None }),
-            value: None
+            operator: TreeOperator::And,
+            left: Box::from(Leaf { attribute: AbeAttribute::new("A"), value: None }),
+            right: Box::from(Leaf { attribute: AbeAttribute::new("B"), value: None }),
+            value: None,
         }),
         right: Box::from(Operator {
             operator: TreeOperator::Or,
-            left: Box::from(Leaf { attribute: "C".to_string(), value:None }),
-            right: Box::from(Leaf { attribute: "D".to_string(), value:None }),
+            left: Box::from(Leaf { attribute: AbeAttribute::new("C"), value: None }),
+            right: Box::from(Leaf { attribute: AbeAttribute::new("D"), value: None }),
             value: None,
         }),
         value: None,
     };
 
-    // SETUP
-    // Create a vector containing 3 strings
-    let attributes = vec!["A", "B", "C", "D"];
+    let m = rng.gen();
 
-    let mut small_t:Vec<Fr> = Vec::new();
-    for _ in 0..attributes.len() {
-        small_t.push(rng.gen());
-    }
-
-    let alpha:Fr = rng.gen();
-    let pair = pairing(g, g2);
-    let y = pair.pow(alpha);
-
-    let mut big_t = Vec::new();
-    for i in 0..attributes.len() {
-        big_t.push(g * small_t[i]);
-    }
-
-    // KEYGEN
-    let my_attributes = vec!["A"];
-    let r = rng.gen();
-    let d_0 = g2 * (alpha - r);
-
-    let mut arr_d = Vec::new();
-    for i in 0..my_attributes.len() {
-        arr_d.push(g2 * (r * small_t[i].inverse().unwrap()));
-    }
-
-
-    // ENCRYPT
-    let m:Gt = rng.gen();
-    let s = rng.gen();
-    let c_0 = g * s;
-    let c_1 = m * y.pow(s);
-    let c_j = tree.get_attributes().iter().enumerate().map(|x| g * (small_t[x.0] * s)).collect::<Vec<G1>>();
-
-    // DECRYPT
-    let mut product= None;
-    for i in 0..my_attributes.len() {
-        if product == None {
-            product = Some(pairing(c_j[i], arr_d[i]));
-        }
-        else {
-            product = Some(product.unwrap() * pairing(c_j[i], arr_d[i]));
-        }
-    }
-
-    let _egsga = pairing(c_0, d_0) * product.unwrap();
-    let _m_prime = c_1 * _egsga.inverse();
-
+    let (public_key, master_key) = setup(tree.clone(), G1::one(), G2::one(), rng);
+    let secret_key = keygen(vec![AbeAttribute::new("A"), AbeAttribute::new("B")], public_key.clone(), master_key.clone(), rng);
+    let cipher_text = encrypt(m, public_key.clone(), tree.clone(), rng);
+    let m_prime = decrypt(cipher_text, secret_key);
 
     // assert that m and _m_prime are equal
-    assert_eq!(m, _m_prime);
+    assert_eq!(m, m_prime.unwrap());
 }
