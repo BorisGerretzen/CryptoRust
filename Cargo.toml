@@ -6,5 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-substrate-bn = "0.6.0"
+#pairing_ce = "0.28.5"
+rabe-bn = "0.4.20"
 rand = "0.8.5"
