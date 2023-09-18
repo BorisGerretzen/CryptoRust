@@ -26,6 +26,7 @@ pub enum AccessTree {
 }
 
 pub trait GetAttributes {
+    /// Returns a vector of all attributes in the tree
     fn get_attributes(&self) -> Vec<AbeAttribute>;
 }
 
@@ -46,6 +47,7 @@ impl GetAttributes for AccessTree {
 }
 
 pub trait AssignValues {
+    /// Assigns values to the tree according to the encryption scheme
     fn assign_values<R: Rng + ?Sized>(&self, s: Fr, s_i: Option<Fr>, rng: &mut R) -> AccessTree;
 }
 
@@ -90,7 +92,10 @@ impl AssignValues for AccessTree {
 }
 
 pub trait MinimalSetFinder {
+    /// Checks if the given set of attributes satisfies the tree
     fn is_satisfiable(&self, attributes: &Vec<AbeAttribute>) -> bool;
+
+    /// Finds the minimal set of attributes that satisfies the tree, starting from the given set
     fn find_minimal_set(&self, attributes: &Vec<AbeAttribute>) -> Result<Vec<AbeAttribute>, InvalidAttributesError>;
 }
 
@@ -110,9 +115,11 @@ impl MinimalSetFinder for AccessTree {
     }
 
     fn find_minimal_set(&self, attributes: &Vec<AbeAttribute>) -> Result<Vec<AbeAttribute>, InvalidAttributesError> {
+        // If initial set does not satisfy we immediately return
         if !self.is_satisfiable(attributes) {
             return Err(InvalidAttributesError {});
         }
+
         // Find all combinations of attributes
         let combinations: Vec<Vec<AbeAttribute>> = (1..attributes.len()).flat_map(|i| attributes.iter().cloned().combinations(i)).collect();
         for combination in combinations {
@@ -120,6 +127,7 @@ impl MinimalSetFinder for AccessTree {
                 return Ok(combination);
             }
         }
+
         return Ok(attributes.clone());
     }
 
