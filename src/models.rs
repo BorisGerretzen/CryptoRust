@@ -1,5 +1,7 @@
 use std::collections::HashMap;
-use rabe_bn::{Fr, G1, G2, Gt};
+
+use rabe_bn::{Fr, Gt, G1, G2};
+
 use crate::access_tree::AccessTree;
 
 #[derive(Debug, Clone, PartialEq)]

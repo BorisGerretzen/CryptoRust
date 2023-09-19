@@ -3,7 +3,6 @@ pub struct AbeAttribute {
     pub name: String,
     pub value: Option<rabe_bn::Fr>,
 }
-
 impl AbeAttribute {
     pub fn new(name: &str) -> AbeAttribute {
         AbeAttribute {

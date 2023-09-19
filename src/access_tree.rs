@@ -1,6 +1,7 @@
 use itertools::Itertools;
-use rand::Rng;
 use rabe_bn::Fr;
+use rand::Rng;
+
 use crate::abe_attribute::AbeAttribute;
 use crate::access_tree::TreeOperator::{And, Or};
 use crate::errors::AbeError;
@@ -54,7 +55,12 @@ pub trait AssignValues {
 impl AssignValues for AccessTree {
     fn assign_values<R: Rng + ?Sized>(&self, s: Fr, to_set: Option<Fr>, rng: &mut R) -> AccessTree {
         match self {
-            AccessTree::Operator { left, right, operator, .. } => {
+            AccessTree::Operator {
+                left,
+                right,
+                operator,
+                ..
+            } => {
                 let mut set_left = None;
                 let mut set_right = None;
 
@@ -78,15 +84,13 @@ impl AssignValues for AccessTree {
                     right: Box::from(right.assign_values(s, set_right, rng)),
                 }
             }
-            AccessTree::Leaf { attribute, .. } => {
-                AccessTree::Leaf {
+            AccessTree::Leaf { attribute, .. } => AccessTree::Leaf {
+                value: to_set,
+                attribute: AbeAttribute {
+                    name: attribute.name.clone(),
                     value: to_set,
-                    attribute: AbeAttribute {
-                        name: attribute.name.clone(),
-                        value: to_set,
-                    },
-                }
-            }
+                },
+            },
         }
     }
 }
@@ -96,32 +100,43 @@ pub trait MinimalSetFinder {
     fn is_satisfiable(&self, attributes: &Vec<AbeAttribute>) -> bool;
 
     /// Finds the minimal set of attributes that satisfies the tree, starting from the given set
-    fn find_minimal_set(&self, attributes: &Vec<AbeAttribute>) -> Result<Vec<AbeAttribute>, AbeError>;
+    fn find_minimal_set(
+        &self,
+        attributes: &Vec<AbeAttribute>,
+    ) -> Result<Vec<AbeAttribute>, AbeError>;
 }
 
 impl MinimalSetFinder for AccessTree {
     fn is_satisfiable(&self, attributes: &Vec<AbeAttribute>) -> bool {
         match self {
-            AccessTree::Operator { operator, left, right, .. } => match operator {
-                And => {
-                    left.is_satisfiable(attributes) && right.is_satisfiable(attributes)
-                }
-                Or => {
-                    left.is_satisfiable(attributes) || right.is_satisfiable(attributes)
-                }
+            AccessTree::Operator {
+                operator,
+                left,
+                right,
+                ..
+            } => match operator {
+                And => left.is_satisfiable(attributes) && right.is_satisfiable(attributes),
+                Or => left.is_satisfiable(attributes) || right.is_satisfiable(attributes),
             },
             AccessTree::Leaf { attribute, .. } => attributes.contains(&attribute),
         }
     }
 
-    fn find_minimal_set(&self, attributes: &Vec<AbeAttribute>) -> Result<Vec<AbeAttribute>, AbeError> {
+    fn find_minimal_set(
+        &self,
+        attributes: &Vec<AbeAttribute>,
+    ) -> Result<Vec<AbeAttribute>, AbeError> {
         // If initial set does not satisfy we immediately return
         if !self.is_satisfiable(attributes) {
-            return Err(AbeError::new("Initial attribute set does not satisfy the tree"));
+            return Err(AbeError::new(
+                "Initial attribute set does not satisfy the tree",
+            ));
         }
 
         // Find all combinations of attributes
-        let combinations: Vec<Vec<AbeAttribute>> = (1..attributes.len()).flat_map(|i| attributes.iter().cloned().combinations(i)).collect();
+        let combinations: Vec<Vec<AbeAttribute>> = (1..attributes.len())
+            .flat_map(|i| attributes.iter().cloned().combinations(i))
+            .collect();
         for combination in combinations {
             if self.is_satisfiable(&combination) {
                 return Ok(combination);
@@ -130,14 +145,13 @@ impl MinimalSetFinder for AccessTree {
 
         return Ok(attributes.clone());
     }
-
 }
 
 #[cfg(test)]
 mod tests {
     use crate::abe_attribute::AbeAttribute;
-    use crate::access_tree::{AccessTree, MinimalSetFinder};
     use crate::access_tree::TreeOperator::{And, Or};
+    use crate::access_tree::{AccessTree, MinimalSetFinder};
     use crate::errors::AbeError;
 
     #[test]
@@ -186,7 +200,7 @@ mod tests {
                 },
             }),
             value: None,
-            operator: Or
+            operator: Or,
         };
 
         assert_eq!(tree.is_satisfiable(&vec![AbeAttribute::new("A")]), true);
@@ -212,13 +226,16 @@ mod tests {
                 },
             }),
             value: None,
-            operator: And
+            operator: And,
         };
 
         assert_eq!(tree.is_satisfiable(&vec![AbeAttribute::new("A")]), false);
         assert_eq!(tree.is_satisfiable(&vec![AbeAttribute::new("B")]), false);
         assert_eq!(tree.is_satisfiable(&vec![AbeAttribute::new("C")]), false);
-        assert_eq!(tree.is_satisfiable(&vec![AbeAttribute::new("A"), AbeAttribute::new("B")]), true);
+        assert_eq!(
+            tree.is_satisfiable(&vec![AbeAttribute::new("A"), AbeAttribute::new("B")]),
+            true
+        );
     }
 
     #[test]
@@ -239,12 +256,24 @@ mod tests {
                 },
             }),
             value: None,
-            operator: Or
+            operator: Or,
         };
 
-        assert_eq!(tree.find_minimal_set(&vec![AbeAttribute::new("A")]).unwrap(), vec![AbeAttribute::new("A")]);
-        assert_eq!(tree.find_minimal_set(&vec![AbeAttribute::new("B")]).unwrap(), vec![AbeAttribute::new("B")]);
-        assert_eq!(tree.find_minimal_set(&vec![AbeAttribute::new("C")]).unwrap_err(), AbeError::new("Initial attribute set does not satisfy the tree"));
+        assert_eq!(
+            tree.find_minimal_set(&vec![AbeAttribute::new("A")])
+                .unwrap(),
+            vec![AbeAttribute::new("A")]
+        );
+        assert_eq!(
+            tree.find_minimal_set(&vec![AbeAttribute::new("B")])
+                .unwrap(),
+            vec![AbeAttribute::new("B")]
+        );
+        assert_eq!(
+            tree.find_minimal_set(&vec![AbeAttribute::new("C")])
+                .unwrap_err(),
+            AbeError::new("Initial attribute set does not satisfy the tree")
+        );
     }
 
     #[test]
@@ -265,19 +294,35 @@ mod tests {
                 },
             }),
             value: None,
-            operator: And
+            operator: And,
         };
 
-        assert_eq!(tree.find_minimal_set(&vec![AbeAttribute::new("A")]).unwrap_err(), AbeError::new("Initial attribute set does not satisfy the tree"));
-        assert_eq!(tree.find_minimal_set(&vec![AbeAttribute::new("B")]).unwrap_err(), AbeError::new("Initial attribute set does not satisfy the tree"));
-        assert_eq!(tree.find_minimal_set(&vec![AbeAttribute::new("C")]).unwrap_err(), AbeError::new("Initial attribute set does not satisfy the tree"));
-        assert_eq!(tree.find_minimal_set(&vec![AbeAttribute::new("A"), AbeAttribute::new("B")]).unwrap(), vec![AbeAttribute::new("A"), AbeAttribute::new("B")]);
+        assert_eq!(
+            tree.find_minimal_set(&vec![AbeAttribute::new("A")])
+                .unwrap_err(),
+            AbeError::new("Initial attribute set does not satisfy the tree")
+        );
+        assert_eq!(
+            tree.find_minimal_set(&vec![AbeAttribute::new("B")])
+                .unwrap_err(),
+            AbeError::new("Initial attribute set does not satisfy the tree")
+        );
+        assert_eq!(
+            tree.find_minimal_set(&vec![AbeAttribute::new("C")])
+                .unwrap_err(),
+            AbeError::new("Initial attribute set does not satisfy the tree")
+        );
+        assert_eq!(
+            tree.find_minimal_set(&vec![AbeAttribute::new("A"), AbeAttribute::new("B")])
+                .unwrap(),
+            vec![AbeAttribute::new("A"), AbeAttribute::new("B")]
+        );
     }
 
     #[test]
     fn test_access_tree_find_minimal_set_complex() {
         let tree = AccessTree::Operator {
-            left: Box::from(AccessTree::Operator  {
+            left: Box::from(AccessTree::Operator {
                 left: Box::from(AccessTree::Leaf {
                     value: None,
                     attribute: AbeAttribute {
@@ -293,7 +338,7 @@ mod tests {
                     },
                 }),
                 value: None,
-                operator: And
+                operator: And,
             }),
             right: Box::from(AccessTree::Operator {
                 left: Box::from(AccessTree::Leaf {
@@ -311,28 +356,109 @@ mod tests {
                     },
                 }),
                 value: None,
-                operator: And
+                operator: And,
             }),
             value: None,
-            operator: Or
+            operator: Or,
         };
 
         let abe_error = AbeError::new("Initial attribute set does not satisfy the tree");
 
-        assert_eq!(tree.find_minimal_set(&vec![AbeAttribute::new("A")]).unwrap_err(), abe_error);
-        assert_eq!(tree.find_minimal_set(&vec![AbeAttribute::new("B")]).unwrap_err(), abe_error);
-        assert_eq!(tree.find_minimal_set(&vec![AbeAttribute::new("C")]).unwrap_err(), abe_error);
-        assert_eq!(tree.find_minimal_set(&vec![AbeAttribute::new("D")]).unwrap_err(), abe_error);
-        assert_eq!(tree.find_minimal_set(&vec![AbeAttribute::new("A"), AbeAttribute::new("B")]).unwrap(), vec![AbeAttribute::new("A"), AbeAttribute::new("B")]);
-        assert_eq!(tree.find_minimal_set(&vec![AbeAttribute::new("A"), AbeAttribute::new("C")]).unwrap_err(), abe_error);
-        assert_eq!(tree.find_minimal_set(&vec![AbeAttribute::new("A"), AbeAttribute::new("D")]).unwrap_err(), abe_error);
-        assert_eq!(tree.find_minimal_set(&vec![AbeAttribute::new("B"), AbeAttribute::new("C")]).unwrap_err(), abe_error);
-        assert_eq!(tree.find_minimal_set(&vec![AbeAttribute::new("B"), AbeAttribute::new("D")]).unwrap_err(), abe_error);
-        assert_eq!(tree.find_minimal_set(&vec![AbeAttribute::new("C"), AbeAttribute::new("D")]).unwrap(), vec![AbeAttribute::new("C"), AbeAttribute::new("D")]);
-        assert_eq!(tree.find_minimal_set(&vec![AbeAttribute::new("A"), AbeAttribute::new("B"), AbeAttribute::new("C")]).unwrap(), vec![AbeAttribute::new("A"), AbeAttribute::new("B")]);
-        assert_eq!(tree.find_minimal_set(&vec![AbeAttribute::new("A"), AbeAttribute::new("B"), AbeAttribute::new("D")]).unwrap(), vec![AbeAttribute::new("A"), AbeAttribute::new("B")]);
-        assert_eq!(tree.find_minimal_set(&vec![AbeAttribute::new("A"), AbeAttribute::new("C"), AbeAttribute::new("D")]).unwrap(), vec![AbeAttribute::new("C"), AbeAttribute::new("D")]);
-        assert_eq!(tree.find_minimal_set(&vec![AbeAttribute::new("B"), AbeAttribute::new("C"), AbeAttribute::new("D")]).unwrap(), vec![AbeAttribute::new("C"), AbeAttribute::new("D")]);
-        assert_eq!(tree.find_minimal_set(&vec![AbeAttribute::new("A"), AbeAttribute::new("B"), AbeAttribute::new("C"), AbeAttribute::new("D")]).unwrap(), vec![AbeAttribute::new("A"), AbeAttribute::new("B")]);
+        assert_eq!(
+            tree.find_minimal_set(&vec![AbeAttribute::new("A")])
+                .unwrap_err(),
+            abe_error
+        );
+        assert_eq!(
+            tree.find_minimal_set(&vec![AbeAttribute::new("B")])
+                .unwrap_err(),
+            abe_error
+        );
+        assert_eq!(
+            tree.find_minimal_set(&vec![AbeAttribute::new("C")])
+                .unwrap_err(),
+            abe_error
+        );
+        assert_eq!(
+            tree.find_minimal_set(&vec![AbeAttribute::new("D")])
+                .unwrap_err(),
+            abe_error
+        );
+        assert_eq!(
+            tree.find_minimal_set(&vec![AbeAttribute::new("A"), AbeAttribute::new("B")])
+                .unwrap(),
+            vec![AbeAttribute::new("A"), AbeAttribute::new("B")]
+        );
+        assert_eq!(
+            tree.find_minimal_set(&vec![AbeAttribute::new("A"), AbeAttribute::new("C")])
+                .unwrap_err(),
+            abe_error
+        );
+        assert_eq!(
+            tree.find_minimal_set(&vec![AbeAttribute::new("A"), AbeAttribute::new("D")])
+                .unwrap_err(),
+            abe_error
+        );
+        assert_eq!(
+            tree.find_minimal_set(&vec![AbeAttribute::new("B"), AbeAttribute::new("C")])
+                .unwrap_err(),
+            abe_error
+        );
+        assert_eq!(
+            tree.find_minimal_set(&vec![AbeAttribute::new("B"), AbeAttribute::new("D")])
+                .unwrap_err(),
+            abe_error
+        );
+        assert_eq!(
+            tree.find_minimal_set(&vec![AbeAttribute::new("C"), AbeAttribute::new("D")])
+                .unwrap(),
+            vec![AbeAttribute::new("C"), AbeAttribute::new("D")]
+        );
+        assert_eq!(
+            tree.find_minimal_set(&vec![
+                AbeAttribute::new("A"),
+                AbeAttribute::new("B"),
+                AbeAttribute::new("C")
+            ])
+            .unwrap(),
+            vec![AbeAttribute::new("A"), AbeAttribute::new("B")]
+        );
+        assert_eq!(
+            tree.find_minimal_set(&vec![
+                AbeAttribute::new("A"),
+                AbeAttribute::new("B"),
+                AbeAttribute::new("D")
+            ])
+            .unwrap(),
+            vec![AbeAttribute::new("A"), AbeAttribute::new("B")]
+        );
+        assert_eq!(
+            tree.find_minimal_set(&vec![
+                AbeAttribute::new("A"),
+                AbeAttribute::new("C"),
+                AbeAttribute::new("D")
+            ])
+            .unwrap(),
+            vec![AbeAttribute::new("C"), AbeAttribute::new("D")]
+        );
+        assert_eq!(
+            tree.find_minimal_set(&vec![
+                AbeAttribute::new("B"),
+                AbeAttribute::new("C"),
+                AbeAttribute::new("D")
+            ])
+            .unwrap(),
+            vec![AbeAttribute::new("C"), AbeAttribute::new("D")]
+        );
+        assert_eq!(
+            tree.find_minimal_set(&vec![
+                AbeAttribute::new("A"),
+                AbeAttribute::new("B"),
+                AbeAttribute::new("C"),
+                AbeAttribute::new("D")
+            ])
+            .unwrap(),
+            vec![AbeAttribute::new("A"), AbeAttribute::new("B")]
+        );
     }
 }

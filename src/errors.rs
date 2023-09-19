@@ -1,13 +1,14 @@
 use std::fmt::{Display, Formatter};
 
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct AbeError{
+pub struct AbeError {
     pub message: String,
 }
+
 impl AbeError {
     pub fn new(message: &str) -> AbeError {
         AbeError {
-            message: message.to_string()
+            message: message.to_string(),
         }
     }
 }
