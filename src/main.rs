@@ -1,7 +1,8 @@
 mod access_tree;
 mod models;
 mod abe_attribute;
-mod invalid_argument_error;
+mod errors;
+mod aes;
 
 extern crate rabe_bn;
 extern crate rand;
@@ -14,8 +15,8 @@ use crate::abe_attribute::AbeAttribute;
 use crate::access_tree::{AccessTree, AssignValues, GetAttributes, MinimalSetFinder};
 use crate::access_tree::AccessTree::Operator;
 use crate::access_tree::AccessTree::Leaf;
-use crate::invalid_argument_error::InvalidAttributesError;
-use crate::models::{AbePublicKey, AbeMasterKey, AbeSecretKey, AbeCipherText};
+use crate::errors::{AbeError};
+use crate::models::{AbePublicKey, AbeMasterKey, AbeSecretKey, AbeCipherText, AbeDecrypted};
 
 fn setup<R: Rng + ?Sized>(access_tree: AccessTree, g: G1, g2: G2, rng: &mut R) -> (AbePublicKey, AbeMasterKey) {
     let attributes = access_tree.get_attributes();
@@ -68,7 +69,7 @@ fn keygen<R: Rng + ?Sized>(attributes: Vec<AbeAttribute>, public_key: AbePublicK
     }
 }
 
-fn encrypt<R: Rng + ?Sized>(message: Gt, public_key: AbePublicKey, access_tree: AccessTree, rng: &mut R) -> AbeCipherText {
+fn encrypt<R: Rng + ?Sized>(secret: Gt, message: &Vec<u8>, public_key: AbePublicKey, access_tree: AccessTree, rng: &mut R) -> Result<AbeCipherText, AbeError> {
     // s = random field element
     let s = rng.gen();
 
@@ -76,7 +77,7 @@ fn encrypt<R: Rng + ?Sized>(message: Gt, public_key: AbePublicKey, access_tree: 
     let c_0 = public_key.g1 * s;
 
     // c1 = m * y^s
-    let c_1 = message * public_key.y.pow(s);
+    let c_1 = secret * public_key.y.pow(s);
 
     // assign values to the tree according to scheme
     let filled_tree = access_tree.assign_values(s, None, rng);
@@ -87,15 +88,18 @@ fn encrypt<R: Rng + ?Sized>(message: Gt, public_key: AbePublicKey, access_tree: 
         .map(|x| (x.name.clone(), public_key.big_t[&x.name] * x.value.unwrap()))
         .collect::<HashMap<String, G1>>();
 
-    AbeCipherText {
+    let message = aes::encrypt_symmetric(secret, message)?;
+
+    Ok(AbeCipherText {
         access_tree: Box::new(filled_tree),
         c_0,
         c_1,
         arr_c: c_j,
-    }
+        message
+    })
 }
 
-fn decrypt(cipher_text: AbeCipherText, secret_key: AbeSecretKey) -> Result<Gt, InvalidAttributesError> {
+fn decrypt(cipher_text: AbeCipherText, secret_key: AbeSecretKey) -> Result<AbeDecrypted, AbeError> {
     // find minimal set of attributes required to decrypt
     let original_set = secret_key.arr_d.iter().map(|(name, _)| AbeAttribute::new(name)).collect::<Vec<AbeAttribute>>();
     let minimal_set = cipher_text.access_tree.find_minimal_set(&original_set)?;
@@ -113,10 +117,15 @@ fn decrypt(cipher_text: AbeCipherText, secret_key: AbeSecretKey) -> Result<Gt, I
     // e(g^s,g^a) = e(c0,d0) * e(g,g)^rs
     let egsga = pairing(cipher_text.c_0, secret_key.d_0) * product.unwrap();
 
-    // m' = c1 / e(g^s,g^a) * product
+    // m' = c1 / e(g^s,g^a)
     let m_prime = cipher_text.c_1 * egsga.inverse();
 
-    Ok(m_prime)
+    let message_bytes = aes::decrypt_symmetric(m_prime, &cipher_text.message)?;
+
+    Ok(AbeDecrypted {
+        secret: m_prime,
+        message: message_bytes,
+    })
 }
 
 fn main() {
@@ -139,13 +148,16 @@ fn main() {
         value: None,
     };
 
-    let m = rng.gen();
+    let secret = rng.gen();
+    let message_bytes = String::from("Hello World!").into_bytes();
 
     let (public_key, master_key) = setup(tree.clone(), G1::one(), G2::one(), rng);
     let secret_key = keygen(vec![AbeAttribute::new("A"), AbeAttribute::new("B")], public_key.clone(), master_key.clone(), rng);
-    let cipher_text = encrypt(m, public_key.clone(), tree.clone(), rng);
-    let m_prime = decrypt(cipher_text, secret_key);
+    let cipher_text = encrypt(secret, &message_bytes, public_key.clone(), tree.clone(), rng).unwrap();
+
+    let decrypted = decrypt(cipher_text, secret_key).unwrap();
 
     // assert that m and _m_prime are equal
-    assert_eq!(m, m_prime.unwrap());
+    assert_eq!(secret, decrypted.secret);
+    assert_eq!(message_bytes, decrypted.message);
 }

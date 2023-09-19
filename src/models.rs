@@ -29,4 +29,10 @@ pub struct AbeCipherText {
     pub c_0: G1,
     pub c_1: Gt,
     pub arr_c: HashMap<String, G1>,
+    pub message: Vec<u8>,
+}
+
+pub struct AbeDecrypted {
+    pub message: Vec<u8>,
+    pub secret: Gt,
 }
