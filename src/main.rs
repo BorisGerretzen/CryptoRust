@@ -102,7 +102,6 @@ fn main() {
         Commands::Encrypt(args) => do_encrypt(&args, rng),
         Commands::Decrypt(args) => do_decrypt(&args),
     };
-
     match result {
         Ok(_) => println!("Done"),
         Err(e) => println!("Error: {:?}", e.to_string()),

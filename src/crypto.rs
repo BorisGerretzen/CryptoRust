@@ -147,7 +147,7 @@ pub fn encrypt<R: Rng + ?Sized>(
         c_1,
         arr_c: c_j
             .map(|c| c.clone().unwrap())
-            .collect::<HashMap<AbeIdentifier, G1>>(),
+            .collect::<Vec<(AbeIdentifier, G1)>>(),
         message,
     })
 }
