@@ -39,36 +39,59 @@ enum Commands {
 
 #[derive(Args, Clone)]
 struct SetupArgs {
+    /// OUT | Where to save public key
     public_key: PathBuf,
+
+    /// OUT | Where to save master key
     master_key: PathBuf,
+
+    /// Attribute set of the system
+    #[arg(required = true)]
     attributes: Vec<String>,
 }
 
 #[derive(Args, Clone)]
 struct KeygenArgs {
+    /// IN | Path to public key
     public_key: PathBuf,
+
+    /// IN | Path to master key
     master_key: PathBuf,
+
+    /// OUT | Where to save secret key
     secret_key: PathBuf,
+
+    /// Attribute set of the key
+    #[arg(required = true)]
     attributes: Vec<String>,
 }
 
 #[derive(Args, Clone)]
 struct EncryptArgs {
+    /// Access policy, e.g. "(A & B) | (C & D)"
     policy: String,
+
+    /// IN | Path to public key
     public_key: PathBuf,
+
+    /// IN | Path to input file
     input: PathBuf,
+
+    /// OUT | Where to save encrypted data
     output: PathBuf,
 }
 
 #[derive(Args, Clone)]
 struct DecryptArgs {
+    /// IN | Path to secret key
+    private_key: PathBuf,
+
+    /// IN | Path to encrypted data
     input: PathBuf,
 
+    /// OUT | Where to save decrypted data
     output: PathBuf,
-
-    private_key: PathBuf,
 }
-
 fn main() {
     let cli = Cli::parse();
     let rng = &mut rand::thread_rng();
