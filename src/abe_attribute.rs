@@ -1,4 +1,6 @@
-#[derive(Debug, Clone)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AbeAttribute {
     pub name: String,
     pub value: Option<rabe_bn::Fr>,

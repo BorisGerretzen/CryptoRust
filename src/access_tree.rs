@@ -1,18 +1,19 @@
 use itertools::Itertools;
 use rabe_bn::Fr;
 use rand::Rng;
+use serde::{Deserialize, Serialize};
 
 use crate::abe_attribute::AbeAttribute;
 use crate::access_tree::TreeOperator::{And, Or};
 use crate::errors::AbeError;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TreeOperator {
     Or,
     And,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Operator {
     pub operator: TreeOperator,
     pub left: Box<AccessTree>,
@@ -20,13 +21,13 @@ pub struct Operator {
     pub value: Option<Fr>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Leaf {
     pub attribute: AbeAttribute,
     pub value: Option<Fr>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AccessTree {
     Operator(Operator),
     Leaf(Leaf),

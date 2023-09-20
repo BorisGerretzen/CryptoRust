@@ -10,18 +10,16 @@ use crate::errors::AbeError;
 use crate::models::{AbeCipherText, AbeDecrypted, AbeMasterKey, AbePublicKey, AbeSecretKey};
 
 pub fn setup<R: Rng + ?Sized>(
-    access_tree: AccessTree,
+    attributes: &Vec<String>,
     g: G1,
     g2: G2,
     rng: &mut R,
 ) -> (AbePublicKey, AbeMasterKey) {
-    let attributes = access_tree.get_attributes();
-
     // Generate random elements for each attribute
     // tj = random field element
     let mut small_t = HashMap::new();
     for i in 0..attributes.len() {
-        small_t.insert(attributes[i].name.clone(), rng.gen());
+        small_t.insert(attributes[i].clone(), rng.gen());
     }
     let alpha: Fr = rng.gen();
 
@@ -32,7 +30,7 @@ pub fn setup<R: Rng + ?Sized>(
     // Tj = g^tj
     let mut big_t = HashMap::new();
     for i in 0..attributes.len() {
-        big_t.insert(attributes[i].name.clone(), g * small_t[&attributes[i].name]);
+        big_t.insert(attributes[i].clone(), g * small_t[&attributes[i]]);
     }
 
     (
@@ -48,9 +46,9 @@ pub fn setup<R: Rng + ?Sized>(
 }
 
 pub fn keygen<R: Rng + ?Sized>(
-    attributes: Vec<AbeAttribute>,
-    public_key: AbePublicKey,
-    master_key: AbeMasterKey,
+    attributes: &Vec<String>,
+    public_key: &AbePublicKey,
+    master_key: &AbeMasterKey,
     rng: &mut R,
 ) -> AbeSecretKey {
     let r = rng.gen();
@@ -63,8 +61,8 @@ pub fn keygen<R: Rng + ?Sized>(
         .iter()
         .map(|a| {
             (
-                a.name.clone(),
-                public_key.g2 * (r * master_key.small_t[&a.name].inverse().unwrap()),
+                a.clone(),
+                public_key.g2 * (r * master_key.small_t[a].inverse().unwrap()),
             )
         })
         .collect::<HashMap<String, G2>>();
@@ -73,10 +71,10 @@ pub fn keygen<R: Rng + ?Sized>(
 }
 
 pub fn encrypt<R: Rng + ?Sized>(
-    secret: Gt,
+    secret: &Gt,
     message: &Vec<u8>,
-    public_key: AbePublicKey,
-    access_tree: AccessTree,
+    public_key: &AbePublicKey,
+    access_tree: &AccessTree,
     rng: &mut R,
 ) -> Result<AbeCipherText, AbeError> {
     // s = random field element
@@ -86,7 +84,7 @@ pub fn encrypt<R: Rng + ?Sized>(
     let c_0 = public_key.g1 * s;
 
     // c1 = m * y^s
-    let c_1 = secret * public_key.y.pow(s);
+    let c_1 = *secret * public_key.y.pow(s);
 
     // assign values to the tree according to scheme
     let filled_tree = access_tree.assign_values(s, None, rng);
@@ -98,7 +96,7 @@ pub fn encrypt<R: Rng + ?Sized>(
         .map(|x| (x.name.clone(), public_key.big_t[&x.name] * x.value.unwrap()))
         .collect::<HashMap<String, G1>>();
 
-    let message = aes::encrypt_symmetric(secret, message)?;
+    let message = aes::encrypt_symmetric(*secret, message)?;
 
     Ok(AbeCipherText {
         access_tree: Box::new(filled_tree),
@@ -110,8 +108,8 @@ pub fn encrypt<R: Rng + ?Sized>(
 }
 
 pub fn decrypt(
-    cipher_text: AbeCipherText,
-    secret_key: AbeSecretKey,
+    cipher_text: &AbeCipherText,
+    secret_key: &AbeSecretKey,
 ) -> Result<AbeDecrypted, AbeError> {
     // find minimal set of attributes required to decrypt
     let original_set = secret_key
@@ -147,4 +145,86 @@ pub fn decrypt(
         secret: m_prime,
         message: message_bytes,
     })
+}
+
+mod tests {
+    use rabe_bn::Group;
+
+    use crate::access_tree::TreeOperator::{And, Or};
+    use crate::access_tree::{Leaf, Operator};
+
+    use super::*;
+
+    #[test]
+    fn correctness_test1() {
+        let rng = &mut rand::thread_rng();
+
+        let access_tree = AccessTree::Operator(Operator {
+            left: Box::from(AccessTree::Operator(Operator {
+                left: Box::from(AccessTree::Leaf(Leaf {
+                    value: None,
+                    attribute: AbeAttribute {
+                        name: "A".to_string(),
+                        value: Some(Fr::one()),
+                    },
+                })),
+                right: Box::from(AccessTree::Leaf(Leaf {
+                    value: None,
+                    attribute: AbeAttribute {
+                        name: "B".to_string(),
+                        value: Some(Fr::one()),
+                    },
+                })),
+                value: None,
+                operator: And,
+            })),
+            right: Box::from(AccessTree::Operator(Operator {
+                left: Box::from(AccessTree::Leaf(Leaf {
+                    value: None,
+                    attribute: AbeAttribute {
+                        name: "C".to_string(),
+                        value: Some(Fr::one()),
+                    },
+                })),
+                right: Box::from(AccessTree::Leaf(Leaf {
+                    value: None,
+                    attribute: AbeAttribute {
+                        name: "D".to_string(),
+                        value: Some(Fr::one()),
+                    },
+                })),
+                value: None,
+                operator: And,
+            })),
+            value: None,
+            operator: Or,
+        });
+
+        let secret: Gt = rng.gen();
+        let message_bytes = String::from("Hello World!").into_bytes();
+
+        let (public_key, master_key) = setup(
+            &access_tree
+                .get_attributes()
+                .iter()
+                .map(|a| a.name.clone())
+                .collect(),
+            G1::one(),
+            G2::one(),
+            rng,
+        );
+        let secret_key = keygen(
+            &vec!["A".to_string(), "B".to_string()],
+            &public_key,
+            &master_key,
+            rng,
+        );
+        let cipher_text = encrypt(&secret, &message_bytes, &public_key, &access_tree, rng).unwrap();
+
+        let decrypted = decrypt(&cipher_text, &secret_key).unwrap();
+
+        // assert that m and _m_prime are equal
+        assert_eq!(secret, decrypted.secret);
+        assert_eq!(message_bytes, decrypted.message);
+    }
 }

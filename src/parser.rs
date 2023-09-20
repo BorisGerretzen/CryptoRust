@@ -17,14 +17,14 @@ pub enum AstNode {
     BinaryOp(char, Box<AstNode>, Box<AstNode>),
 }
 
-pub struct Parser {
+pub struct AccessTreeParser {
     tokens: Vec<Token>,
     current_token: Option<Token>,
     position: usize,
 }
 
-impl Parser {
-    pub fn new(input: &str) -> Parser {
+impl AccessTreeParser {
+    pub fn new(input: &str) -> AccessTreeParser {
         // simple lexer
         let mut tokens = Vec::new();
         for c in input.chars() {
@@ -38,7 +38,7 @@ impl Parser {
             }
         }
 
-        Parser {
+        AccessTreeParser {
             tokens,
             current_token: None,
             position: 0,
@@ -131,7 +131,7 @@ impl Parser {
         })
     }
 
-    pub fn parse(&mut self) -> Result<access_tree::AccessTree, AbeError> {
+    fn generate_ast(&mut self) -> Result<AstNode, AbeError> {
         self.advance();
         let ast = self.parse_expr();
 
@@ -139,7 +139,12 @@ impl Parser {
             return Err(AbeError::new("Invalid expression"));
         }
 
-        self.ast_to_access_tree(ast.unwrap())
+        Ok(ast.unwrap())
+    }
+
+    pub fn parse(&mut self) -> Result<access_tree::AccessTree, AbeError> {
+        let ast = self.generate_ast()?;
+        self.ast_to_access_tree(ast)
     }
 }
 
@@ -149,12 +154,12 @@ mod tests {
     #[test]
     fn test_parser() {
         let input = "a&b|c";
-        let mut parser = Parser::new(input);
-        let result = parser.parse();
+        let mut parser = AccessTreeParser::new(input);
+        let result = parser.generate_ast().unwrap();
 
         assert_eq!(
             result,
-            Some(AstNode::BinaryOp(
+            AstNode::BinaryOp(
                 '|',
                 Box::new(AstNode::BinaryOp(
                     '&',
@@ -162,100 +167,100 @@ mod tests {
                     Box::new(AstNode::Variable('b')),
                 )),
                 Box::new(AstNode::Variable('c')),
-            ))
+            )
         );
     }
 
     #[test]
     fn test_parser2() {
         let input = "a&(b|c)";
-        let mut parser = Parser::new(input);
-        let result = parser.parse();
+        let mut parser = AccessTreeParser::new(input);
+        let result = parser.generate_ast().unwrap();
 
         assert_eq!(
             result,
-            Some(AstNode::BinaryOp(
+            AstNode::BinaryOp(
                 '&',
                 Box::new(AstNode::Variable('a')),
                 Box::new(AstNode::BinaryOp(
                     '|',
                     Box::new(AstNode::Variable('b')),
                     Box::new(AstNode::Variable('c')),
-                )),
-            ))
+                ),)
+            )
         );
     }
 
     #[test]
     fn test_parser_or() {
         let input = "a|b";
-        let mut parser = Parser::new(input);
-        let result = parser.parse();
+        let mut parser = AccessTreeParser::new(input);
+        let result = parser.generate_ast().unwrap();
 
         assert_eq!(
             result,
-            Some(AstNode::BinaryOp(
+            AstNode::BinaryOp(
                 '|',
                 Box::new(AstNode::Variable('a')),
                 Box::new(AstNode::Variable('b')),
-            ))
+            )
         );
     }
 
     #[test]
     fn test_parser_and() {
         let input = "a&b";
-        let mut parser = Parser::new(input);
-        let result = parser.parse();
+        let mut parser = AccessTreeParser::new(input);
+        let result = parser.generate_ast().unwrap();
 
         assert_eq!(
             result,
-            Some(AstNode::BinaryOp(
+            AstNode::BinaryOp(
                 '&',
                 Box::new(AstNode::Variable('a')),
                 Box::new(AstNode::Variable('b')),
-            ))
+            )
         );
     }
 
     #[test]
     fn test_parser_paren() {
         let input = "(a)";
-        let mut parser = Parser::new(input);
-        let result = parser.parse();
+        let mut parser = AccessTreeParser::new(input);
+        let result = parser.generate_ast().unwrap();
 
-        assert_eq!(result, Some(AstNode::Variable('a')));
+        assert_eq!(result, AstNode::Variable('a'));
     }
 
     #[test]
     fn test_parser_paren_and() {
         let input = "(a&b)";
-        let mut parser = Parser::new(input);
-        let result = parser.parse();
+        let mut parser = AccessTreeParser::new(input);
+        let result = parser.generate_ast().unwrap();
 
         assert_eq!(
             result,
-            Some(AstNode::BinaryOp(
+            AstNode::BinaryOp(
                 '&',
                 Box::new(AstNode::Variable('a')),
                 Box::new(AstNode::Variable('b')),
-            ))
+            )
         );
     }
 
     #[test]
     fn test_parser_paren_or() {
         let input = "(a|b)";
-        let mut parser = Parser::new(input);
-        let result = parser.parse();
+        let mut parser = AccessTreeParser::new(input);
+        let result = parser.generate_ast().unwrap();
 
         assert_eq!(
             result,
-            Some(AstNode::BinaryOp(
+            AstNode::BinaryOp(
                 '|',
                 Box::new(AstNode::Variable('a')),
                 Box::new(AstNode::Variable('b')),
-            ))
+            )
         );
     }
 }
