@@ -11,7 +11,7 @@ use rabe_bn::{Group, Gt, G1, G2};
 use rand::Rng;
 use serde::Deserialize;
 
-use crate::errors::AbeError;
+use crate::errors::abe_error::AbeError;
 use crate::models::{AbeCipherText, AbeMasterKey, AbePublicKey, AbeSecretKey};
 use crate::parser::AccessTreeParser;
 
@@ -150,7 +150,10 @@ fn do_keygen<R: Rng + ?Sized>(args: &KeygenArgs, rng: &mut R) -> Result<(), AbeE
         ));
     }
 
-    let secret_key = crypto::keygen(&args.attributes, &public_key, &master_key, rng);
+    let secret_key =
+        crypto::keygen(&args.attributes, &public_key, &master_key, rng).map_err(|e| {
+            AbeError::new(format!("Could not serialize secret key: {:?}", e.to_string()).as_str())
+        })?;
 
     let serialized_secret_key = serde_json::to_string(&secret_key).map_err(|e| {
         AbeError::new(format!("Could not serialize secret key: {:?}", e.to_string()).as_str())

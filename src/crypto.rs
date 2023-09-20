@@ -3,10 +3,10 @@ use std::collections::HashMap;
 use rabe_bn::{pairing, Fr, Gt, G1, G2};
 use rand::Rng;
 
-use crate::abe_attribute::AbeAttribute;
+use crate::abe_attribute::{AbeAttribute, AbeIdentifier};
 use crate::access_tree::{AccessTree, AssignValues, GetAttributes, MinimalSetFinder};
 use crate::aes;
-use crate::errors::AbeError;
+use crate::errors::abe_error::AbeError;
 use crate::models::{AbeCipherText, AbeDecrypted, AbeMasterKey, AbePublicKey, AbeSecretKey};
 
 pub fn setup<R: Rng + ?Sized>(
@@ -50,24 +50,43 @@ pub fn keygen<R: Rng + ?Sized>(
     public_key: &AbePublicKey,
     master_key: &AbeMasterKey,
     rng: &mut R,
-) -> AbeSecretKey {
+) -> Result<AbeSecretKey, AbeError> {
     let r = rng.gen();
 
     // d0 = g2^(alpha-r)
     let d_0 = public_key.g2 * (master_key.alpha - r);
 
     // dj = g2^(r * tj^-1)
-    let arr_d = attributes
-        .iter()
-        .map(|a| {
-            (
-                a.clone(),
-                public_key.g2 * (r * master_key.small_t[a].inverse().unwrap()),
-            )
-        })
-        .collect::<HashMap<String, G2>>();
+    let arr_d = attributes.iter().map(|a| {
+        let clone = a.clone();
+        let inverse = master_key.small_t[a].inverse().ok_or(AbeError::new(
+            format!("Could not calculate inverse of {}", a).as_str(),
+        ));
+        match inverse {
+            Ok(inverse) => Ok((clone, public_key.g2 * (r * inverse))),
+            Err(e) => Err(e),
+        }
+    });
 
-    AbeSecretKey { d_0, arr_d }
+    // get errors if any
+    let errors = arr_d
+        .clone()
+        .filter(|d| d.is_err())
+        .map(|d| d.err().unwrap())
+        .collect::<Vec<AbeError>>();
+
+    if errors.len() > 0 {
+        let mut error_message = String::from("Could not calculate dj for attributes: ");
+        for error in errors {
+            error_message.push_str(&format!("{:?}, ", error));
+        }
+        return Err(AbeError::new(error_message.as_str()));
+    }
+
+    Ok(AbeSecretKey {
+        d_0,
+        arr_d: arr_d.map(|d| d.unwrap()).collect::<HashMap<String, G2>>(),
+    })
 }
 
 pub fn encrypt<R: Rng + ?Sized>(
@@ -87,14 +106,38 @@ pub fn encrypt<R: Rng + ?Sized>(
     let c_1 = *secret * public_key.y.pow(s);
 
     // assign values to the tree according to scheme
-    let filled_tree = access_tree.assign_values(s, None, rng);
+    let mut filled_tree = access_tree.assign_values(s, None, rng);
+    filled_tree.assign_indices();
 
     // cj = g1^tj * sj
-    let c_j = filled_tree
-        .get_attributes()
-        .iter()
-        .map(|x| (x.name.clone(), public_key.big_t[&x.name] * x.value.unwrap()))
-        .collect::<HashMap<String, G1>>();
+    let attributes = filled_tree.get_attributes();
+    let c_j = attributes.iter().map(|x| {
+        let value = x.value.ok_or(AbeError::new(
+            format!("Expected value for {} but got None", x.name).as_str(),
+        ));
+
+        match value {
+            Ok(value) => Ok((
+                AbeIdentifier::from(x.clone()),
+                public_key.big_t[&x.name] * value,
+            )),
+            Err(e) => Err(e),
+        }
+    });
+
+    let errors = c_j
+        .clone()
+        .filter(|d| d.is_err())
+        .map(|d| d.clone().err().unwrap())
+        .collect::<Vec<AbeError>>();
+
+    if errors.len() > 0 {
+        let mut error_message = String::from("Could not calculate cj for attributes: ");
+        for error in errors {
+            error_message.push_str(&format!("{:?}, ", error));
+        }
+        return Err(AbeError::new(error_message.as_str()));
+    }
 
     let message = aes::encrypt_symmetric(*secret, message)?;
 
@@ -102,7 +145,9 @@ pub fn encrypt<R: Rng + ?Sized>(
         access_tree: Box::new(filled_tree),
         c_0,
         c_1,
-        arr_c: c_j,
+        arr_c: c_j
+            .map(|c| c.clone().unwrap())
+            .collect::<HashMap<AbeIdentifier, G1>>(),
         message,
     })
 }
@@ -117,24 +162,35 @@ pub fn decrypt(
         .iter()
         .map(|(name, _)| AbeAttribute::new(name))
         .collect::<Vec<AbeAttribute>>();
+
     let minimal_set = cipher_text.access_tree.find_minimal_set(&original_set)?;
 
-    // e(g,g)^rs = product of e(cj,dj)
-    let mut product = None;
-    for (name, d) in secret_key
-        .arr_d
+    let product = cipher_text
+        .arr_c
         .iter()
-        .filter(|(name, _)| minimal_set.contains(&AbeAttribute::new(name)))
-    {
-        if product == None {
-            product = Some(pairing(cipher_text.arr_c[name], *d));
-        } else {
-            product = Some(product.unwrap() * pairing(cipher_text.arr_c[name], *d));
-        }
-    }
+        .filter(|(identifier, _)| {
+            minimal_set.contains(&AbeAttribute::new(identifier.name.as_str()))
+        })
+        .map(|(identifier, c)| pairing(*c, secret_key.arr_d[&identifier.name]))
+        .fold(None, |acc, e| match acc {
+            None => Some(e),
+            Some(acc) => Some(acc * e),
+        })
+        .ok_or(AbeError::new("Could not calculate product of e(cj,dj)"))?;
+
+    // e(g,g)^rs = product of e(cj,dj)
+    // let p2 = secret_key
+    //     .arr_d
+    //     .iter()
+    //     .filter(|(name, _)| minimal_set.contains(&AbeAttribute::new(name)))
+    //     .map(|(name, d)| pairing(cipher_text.arr_c[name], *d))
+    //     .fold(None, |acc, e| match acc {
+    //         None => Some(e),
+    //         Some(acc) => Some(acc * e),
+    //     }).ok_or(AbeError::new("Could not calculate product of e(cj,dj)"))?;
 
     // e(g^s,g^a) = e(c0,d0) * e(g,g)^rs
-    let egsga = pairing(cipher_text.c_0, secret_key.d_0) * product.unwrap();
+    let egsga = pairing(cipher_text.c_0, secret_key.d_0) * product;
 
     // m' = c1 / e(g^s,g^a)
     let m_prime = cipher_text.c_1 * egsga.inverse();
@@ -145,86 +201,4 @@ pub fn decrypt(
         secret: m_prime,
         message: message_bytes,
     })
-}
-
-mod tests {
-    use rabe_bn::Group;
-
-    use crate::access_tree::TreeOperator::{And, Or};
-    use crate::access_tree::{Leaf, Operator};
-
-    use super::*;
-
-    #[test]
-    fn correctness_test1() {
-        let rng = &mut rand::thread_rng();
-
-        let access_tree = AccessTree::Operator(Operator {
-            left: Box::from(AccessTree::Operator(Operator {
-                left: Box::from(AccessTree::Leaf(Leaf {
-                    value: None,
-                    attribute: AbeAttribute {
-                        name: "A".to_string(),
-                        value: Some(Fr::one()),
-                    },
-                })),
-                right: Box::from(AccessTree::Leaf(Leaf {
-                    value: None,
-                    attribute: AbeAttribute {
-                        name: "B".to_string(),
-                        value: Some(Fr::one()),
-                    },
-                })),
-                value: None,
-                operator: And,
-            })),
-            right: Box::from(AccessTree::Operator(Operator {
-                left: Box::from(AccessTree::Leaf(Leaf {
-                    value: None,
-                    attribute: AbeAttribute {
-                        name: "C".to_string(),
-                        value: Some(Fr::one()),
-                    },
-                })),
-                right: Box::from(AccessTree::Leaf(Leaf {
-                    value: None,
-                    attribute: AbeAttribute {
-                        name: "D".to_string(),
-                        value: Some(Fr::one()),
-                    },
-                })),
-                value: None,
-                operator: And,
-            })),
-            value: None,
-            operator: Or,
-        });
-
-        let secret: Gt = rng.gen();
-        let message_bytes = String::from("Hello World!").into_bytes();
-
-        let (public_key, master_key) = setup(
-            &access_tree
-                .get_attributes()
-                .iter()
-                .map(|a| a.name.clone())
-                .collect(),
-            G1::one(),
-            G2::one(),
-            rng,
-        );
-        let secret_key = keygen(
-            &vec!["A".to_string(), "B".to_string()],
-            &public_key,
-            &master_key,
-            rng,
-        );
-        let cipher_text = encrypt(&secret, &message_bytes, &public_key, &access_tree, rng).unwrap();
-
-        let decrypted = decrypt(&cipher_text, &secret_key).unwrap();
-
-        // assert that m and _m_prime are equal
-        assert_eq!(secret, decrypted.secret);
-        assert_eq!(message_bytes, decrypted.message);
-    }
 }

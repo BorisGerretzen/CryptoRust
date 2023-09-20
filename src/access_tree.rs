@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::abe_attribute::AbeAttribute;
 use crate::access_tree::TreeOperator::{And, Or};
-use crate::errors::AbeError;
+use crate::errors::abe_error::AbeError;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TreeOperator {
@@ -31,6 +31,26 @@ pub struct Leaf {
 pub enum AccessTree {
     Operator(Operator),
     Leaf(Leaf),
+}
+
+impl AccessTree {
+    pub fn assign_indices(&mut self) {
+        let mut index = 0;
+        self.assign_indices_rec(&mut index);
+    }
+
+    fn assign_indices_rec(&mut self, index: &mut usize) {
+        match self {
+            AccessTree::Operator(Operator { left, right, .. }) => {
+                left.assign_indices_rec(index);
+                right.assign_indices_rec(index);
+            }
+            AccessTree::Leaf(Leaf { attribute, .. }) => {
+                attribute.index = Some(*index);
+                *index += 1;
+            }
+        }
+    }
 }
 
 pub trait GetAttributes {
@@ -70,15 +90,16 @@ impl AssignValues for AccessTree {
             }) => {
                 let mut set_left = None;
                 let mut set_right = None;
+                let target = to_set.unwrap_or(s);
 
                 if operator == &Or {
-                    set_left = Some(s);
-                    set_right = Some(s);
+                    set_left = Some(target);
+                    set_right = Some(target);
                 }
 
                 if operator == &And {
                     let s_i1 = rng.gen();
-                    let s_i2 = s - s_i1;
+                    let s_i2 = target - s_i1;
 
                     set_left = Some(s_i1);
                     set_right = Some(s_i2);
@@ -94,6 +115,7 @@ impl AssignValues for AccessTree {
             AccessTree::Leaf(Leaf { attribute, .. }) => AccessTree::Leaf(Leaf {
                 value: to_set,
                 attribute: AbeAttribute {
+                    index: attribute.index,
                     name: attribute.name.clone(),
                     value: to_set,
                 },
@@ -125,7 +147,9 @@ impl MinimalSetFinder for AccessTree {
                 And => left.is_satisfiable(attributes) && right.is_satisfiable(attributes),
                 Or => left.is_satisfiable(attributes) || right.is_satisfiable(attributes),
             },
-            AccessTree::Leaf(Leaf { attribute, .. }) => attributes.contains(&attribute),
+            AccessTree::Leaf(Leaf { attribute, .. }) => {
+                attributes.iter().any(|a| a.name == attribute.name)
+            }
         }
     }
 
@@ -135,6 +159,7 @@ impl MinimalSetFinder for AccessTree {
     ) -> Result<Vec<AbeAttribute>, AbeError> {
         // If initial set does not satisfy we immediately return
         if !self.is_satisfiable(attributes) {
+            println!("{:#?} {:#?}", self, attributes);
             return Err(AbeError::new(
                 "Initial attribute set does not satisfy the tree",
             ));
@@ -158,31 +183,23 @@ impl MinimalSetFinder for AccessTree {
 mod tests {
     use crate::abe_attribute::AbeAttribute;
     use crate::access_tree::TreeOperator::{And, Or};
-    use crate::access_tree::{AccessTree, Leaf, MinimalSetFinder, Operator};
-    use crate::errors::AbeError;
+    use crate::access_tree::{AccessTree, GetAttributes, Leaf, MinimalSetFinder, Operator};
+    use crate::errors::abe_error::AbeError;
+    use crate::parser::AccessTreeParser;
 
     #[test]
     fn test_access_tree_equality() {
         let a = AccessTree::Leaf(Leaf {
             value: Some(rabe_bn::Fr::one()),
-            attribute: AbeAttribute {
-                name: "A".to_string(),
-                value: Some(rabe_bn::Fr::one()),
-            },
+            attribute: AbeAttribute::new_with_value("A", rabe_bn::Fr::one()),
         });
         let b = AccessTree::Leaf(Leaf {
             value: Some(rabe_bn::Fr::one()),
-            attribute: AbeAttribute {
-                name: "B".to_string(),
-                value: Some(rabe_bn::Fr::one()),
-            },
+            attribute: AbeAttribute::new_with_value("B", rabe_bn::Fr::one()),
         });
         let c = AccessTree::Leaf(Leaf {
             value: Some(rabe_bn::Fr::one()),
-            attribute: AbeAttribute {
-                name: "A".to_string(),
-                value: Some(rabe_bn::Fr::one()),
-            },
+            attribute: AbeAttribute::new_with_value("A", rabe_bn::Fr::one()),
         });
 
         assert_eq!(a, c);
@@ -194,17 +211,11 @@ mod tests {
         let tree = AccessTree::Operator(Operator {
             left: Box::from(AccessTree::Leaf(Leaf {
                 value: None,
-                attribute: AbeAttribute {
-                    name: "A".to_string(),
-                    value: Some(rabe_bn::Fr::one()),
-                },
+                attribute: AbeAttribute::new_with_value("A", rabe_bn::Fr::one()),
             })),
             right: Box::from(AccessTree::Leaf(Leaf {
                 value: None,
-                attribute: AbeAttribute {
-                    name: "B".to_string(),
-                    value: Some(rabe_bn::Fr::one()),
-                },
+                attribute: AbeAttribute::new_with_value("B", rabe_bn::Fr::one()),
             })),
             value: None,
             operator: Or,
@@ -220,17 +231,11 @@ mod tests {
         let tree = AccessTree::Operator(Operator {
             left: Box::from(AccessTree::Leaf(Leaf {
                 value: None,
-                attribute: AbeAttribute {
-                    name: "A".to_string(),
-                    value: Some(rabe_bn::Fr::one()),
-                },
+                attribute: AbeAttribute::new_with_value("A", rabe_bn::Fr::one()),
             })),
             right: Box::from(AccessTree::Leaf(Leaf {
                 value: None,
-                attribute: AbeAttribute {
-                    name: "B".to_string(),
-                    value: Some(rabe_bn::Fr::one()),
-                },
+                attribute: AbeAttribute::new_with_value("B", rabe_bn::Fr::one()),
             })),
             value: None,
             operator: And,
@@ -250,17 +255,11 @@ mod tests {
         let tree = AccessTree::Operator(Operator {
             left: Box::from(AccessTree::Leaf(Leaf {
                 value: None,
-                attribute: AbeAttribute {
-                    name: "A".to_string(),
-                    value: Some(rabe_bn::Fr::one()),
-                },
+                attribute: AbeAttribute::new_with_value("A", rabe_bn::Fr::one()),
             })),
             right: Box::from(AccessTree::Leaf(Leaf {
                 value: None,
-                attribute: AbeAttribute {
-                    name: "B".to_string(),
-                    value: Some(rabe_bn::Fr::one()),
-                },
+                attribute: AbeAttribute::new_with_value("B", rabe_bn::Fr::one()),
             })),
             value: None,
             operator: Or,
@@ -288,17 +287,11 @@ mod tests {
         let tree = AccessTree::Operator(Operator {
             left: Box::from(AccessTree::Leaf(Leaf {
                 value: None,
-                attribute: AbeAttribute {
-                    name: "A".to_string(),
-                    value: Some(rabe_bn::Fr::one()),
-                },
+                attribute: AbeAttribute::new_with_value("A", rabe_bn::Fr::one()),
             })),
             right: Box::from(AccessTree::Leaf(Leaf {
                 value: None,
-                attribute: AbeAttribute {
-                    name: "B".to_string(),
-                    value: Some(rabe_bn::Fr::one()),
-                },
+                attribute: AbeAttribute::new_with_value("B", rabe_bn::Fr::one()),
             })),
             value: None,
             operator: And,
@@ -332,17 +325,11 @@ mod tests {
             left: Box::from(AccessTree::Operator(Operator {
                 left: Box::from(AccessTree::Leaf(Leaf {
                     value: None,
-                    attribute: AbeAttribute {
-                        name: "A".to_string(),
-                        value: Some(rabe_bn::Fr::one()),
-                    },
+                    attribute: AbeAttribute::new_with_value("A", rabe_bn::Fr::one()),
                 })),
                 right: Box::from(AccessTree::Leaf(Leaf {
                     value: None,
-                    attribute: AbeAttribute {
-                        name: "B".to_string(),
-                        value: Some(rabe_bn::Fr::one()),
-                    },
+                    attribute: AbeAttribute::new_with_value("B", rabe_bn::Fr::one()),
                 })),
                 value: None,
                 operator: And,
@@ -350,17 +337,11 @@ mod tests {
             right: Box::from(AccessTree::Operator(Operator {
                 left: Box::from(AccessTree::Leaf(Leaf {
                     value: None,
-                    attribute: AbeAttribute {
-                        name: "C".to_string(),
-                        value: Some(rabe_bn::Fr::one()),
-                    },
+                    attribute: AbeAttribute::new_with_value("C", rabe_bn::Fr::one()),
                 })),
                 right: Box::from(AccessTree::Leaf(Leaf {
                     value: None,
-                    attribute: AbeAttribute {
-                        name: "D".to_string(),
-                        value: Some(rabe_bn::Fr::one()),
-                    },
+                    attribute: AbeAttribute::new_with_value("D", rabe_bn::Fr::one()),
                 })),
                 value: None,
                 operator: And,
@@ -425,47 +406,123 @@ mod tests {
             tree.find_minimal_set(&vec![
                 AbeAttribute::new("A"),
                 AbeAttribute::new("B"),
+                AbeAttribute::new("C"),
+            ])
+            .unwrap(),
+            vec![AbeAttribute::new("A"), AbeAttribute::new("B")]
+        );
+        assert_eq!(
+            tree.find_minimal_set(&vec![
+                AbeAttribute::new("A"),
+                AbeAttribute::new("B"),
+                AbeAttribute::new("D"),
+            ])
+            .unwrap(),
+            vec![AbeAttribute::new("A"), AbeAttribute::new("B")]
+        );
+        assert_eq!(
+            tree.find_minimal_set(&vec![
+                AbeAttribute::new("A"),
+                AbeAttribute::new("C"),
+                AbeAttribute::new("D"),
+            ])
+            .unwrap(),
+            vec![AbeAttribute::new("C"), AbeAttribute::new("D")]
+        );
+        assert_eq!(
+            tree.find_minimal_set(&vec![
+                AbeAttribute::new("B"),
+                AbeAttribute::new("C"),
+                AbeAttribute::new("D"),
+            ])
+            .unwrap(),
+            vec![AbeAttribute::new("C"), AbeAttribute::new("D")]
+        );
+        assert_eq!(
+            tree.find_minimal_set(&vec![
+                AbeAttribute::new("A"),
+                AbeAttribute::new("B"),
+                AbeAttribute::new("C"),
+                AbeAttribute::new("D"),
+            ])
+            .unwrap(),
+            vec![AbeAttribute::new("A"), AbeAttribute::new("B")]
+        );
+    }
+
+    #[test]
+    pub fn test_access_tree_complex() {
+        let input = "(A|D)&(B|E)&C&A";
+        let mut parser = AccessTreeParser::new(input);
+        let tree = parser.parse().unwrap();
+
+        assert_eq!(
+            tree.find_minimal_set(&vec![
+                AbeAttribute::new("A"),
+                AbeAttribute::new("B"),
+                AbeAttribute::new("C"),
+                AbeAttribute::new("D"),
+            ])
+            .unwrap(),
+            vec![
+                AbeAttribute::new("A"),
+                AbeAttribute::new("B"),
                 AbeAttribute::new("C")
-            ])
-            .unwrap(),
-            vec![AbeAttribute::new("A"), AbeAttribute::new("B")]
+            ]
         );
+    }
+
+    #[test]
+    pub fn test_minimal_set_double() {
+        let input = "A|B";
+        let mut parser = AccessTreeParser::new(input);
+        let tree = parser.parse().unwrap();
+
         assert_eq!(
-            tree.find_minimal_set(&vec![
-                AbeAttribute::new("A"),
-                AbeAttribute::new("B"),
-                AbeAttribute::new("D")
-            ])
-            .unwrap(),
-            vec![AbeAttribute::new("A"), AbeAttribute::new("B")]
+            tree.find_minimal_set(&vec![AbeAttribute::new("A"), AbeAttribute::new("B"),])
+                .unwrap(),
+            vec![AbeAttribute::new("A")]
         );
+    }
+
+    #[test]
+    pub fn test_assign_indices() {
+        let input = "A|B";
+        let mut parser = AccessTreeParser::new(input);
+        let mut tree = parser.parse().unwrap();
+        tree.assign_indices();
+
+        let attributes = tree.get_attributes();
+        assert_eq!(attributes[0].index, Some(0));
+        assert_eq!(attributes[1].index, Some(1));
+    }
+
+    #[test]
+    pub fn test_assign_indices_complex() {
+        let input = "(A|D)&(B|E)&C&A";
+        let mut parser = AccessTreeParser::new(input);
+        let mut tree = parser.parse().unwrap();
+        tree.assign_indices();
+
+        let attributes = tree.get_attributes();
+        assert_eq!(attributes[0].index, Some(0));
+        assert_eq!(attributes[1].index, Some(1));
+        assert_eq!(attributes[2].index, Some(2));
+        assert_eq!(attributes[3].index, Some(3));
+        assert_eq!(attributes[4].index, Some(4));
+        assert_eq!(attributes[5].index, Some(5));
+    }
+
+    #[test]
+    pub fn test_minimal_set_a_and_a() {
+        let input = "A&A";
+        let mut parser = AccessTreeParser::new(input);
+        let tree = parser.parse().unwrap();
+
         assert_eq!(
-            tree.find_minimal_set(&vec![
-                AbeAttribute::new("A"),
-                AbeAttribute::new("C"),
-                AbeAttribute::new("D")
-            ])
-            .unwrap(),
-            vec![AbeAttribute::new("C"), AbeAttribute::new("D")]
-        );
-        assert_eq!(
-            tree.find_minimal_set(&vec![
-                AbeAttribute::new("B"),
-                AbeAttribute::new("C"),
-                AbeAttribute::new("D")
-            ])
-            .unwrap(),
-            vec![AbeAttribute::new("C"), AbeAttribute::new("D")]
-        );
-        assert_eq!(
-            tree.find_minimal_set(&vec![
-                AbeAttribute::new("A"),
-                AbeAttribute::new("B"),
-                AbeAttribute::new("C"),
-                AbeAttribute::new("D")
-            ])
-            .unwrap(),
-            vec![AbeAttribute::new("A"), AbeAttribute::new("B")]
+            tree.find_minimal_set(&vec![AbeAttribute::new("A"),])
+                .unwrap(),
+            vec![AbeAttribute::new("A")]
         );
     }
 }

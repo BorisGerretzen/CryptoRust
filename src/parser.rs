@@ -1,8 +1,8 @@
 use crate::abe_attribute::AbeAttribute;
 use crate::access_tree;
-use crate::errors::AbeError;
+use crate::errors::parse_error::ParseError;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Copy)]
 enum Token {
     Variable(char),
     And,
@@ -54,17 +54,24 @@ impl AccessTreeParser {
         }
     }
 
-    fn parse_variable(&mut self) -> Option<AstNode> {
+    fn parse_variable(&mut self) -> Result<AstNode, ParseError> {
         match self.current_token {
             Some(Token::Variable(c)) => {
                 self.advance();
-                Some(AstNode::Variable(c))
+                Ok(AstNode::Variable(c))
             }
-            _ => None,
+            Some(token) => Err(ParseError::new(
+                format!("Invalid token {:?}", token).as_str(),
+                self.position,
+            )),
+            None => Err(ParseError::new(
+                "Expected variable but got None",
+                self.position,
+            )),
         }
     }
 
-    fn parse_factor(&mut self) -> Option<AstNode> {
+    fn parse_factor(&mut self) -> Result<AstNode, ParseError> {
         match self.current_token {
             Some(Token::OpenParen) => {
                 self.advance();
@@ -78,35 +85,27 @@ impl AccessTreeParser {
         }
     }
 
-    fn parse_term(&mut self) -> Option<AstNode> {
-        let mut left = self.parse_factor();
+    fn parse_term(&mut self) -> Result<AstNode, ParseError> {
+        let mut left = self.parse_factor()?;
         while let Some(Token::And) = self.current_token {
             self.advance();
-            let right = self.parse_factor();
-            left = Some(AstNode::BinaryOp(
-                '&',
-                Box::new(left.unwrap()),
-                Box::new(right.unwrap()),
-            ));
+            let right = self.parse_factor()?;
+            left = AstNode::BinaryOp('&', Box::new(left), Box::new(right));
         }
-        left
+        Ok(left)
     }
 
-    fn parse_expr(&mut self) -> Option<AstNode> {
-        let mut left = self.parse_term();
+    fn parse_expr(&mut self) -> Result<AstNode, ParseError> {
+        let mut left = self.parse_term()?;
         while let Some(Token::Or) = self.current_token {
             self.advance();
-            let right = self.parse_term();
-            left = Some(AstNode::BinaryOp(
-                '|',
-                Box::new(left.unwrap()),
-                Box::new(right.unwrap()),
-            ));
+            let right = self.parse_term()?;
+            left = AstNode::BinaryOp('|', Box::new(left), Box::new(right));
         }
-        left
+        Ok(left)
     }
 
-    fn ast_to_access_tree(&self, ast: AstNode) -> Result<access_tree::AccessTree, AbeError> {
+    fn ast_to_access_tree(&self, ast: AstNode) -> Result<access_tree::AccessTree, ParseError> {
         Ok(match ast {
             AstNode::Variable(c) => access_tree::AccessTree::Leaf(access_tree::Leaf {
                 attribute: AbeAttribute::new(&c.to_string()),
@@ -118,9 +117,10 @@ impl AccessTreeParser {
                         '|' => access_tree::TreeOperator::Or,
                         '&' => access_tree::TreeOperator::And,
                         _ => {
-                            return Err(AbeError::new(
+                            return Err(ParseError::new(
                                 format!("Invalid operator '{}'", op).as_str(),
-                            ))
+                                self.position,
+                            ));
                         }
                     },
                     left: Box::from(self.ast_to_access_tree(*left)?),
@@ -131,23 +131,27 @@ impl AccessTreeParser {
         })
     }
 
-    fn generate_ast(&mut self) -> Result<AstNode, AbeError> {
+    fn generate_ast(&mut self) -> Result<AstNode, ParseError> {
         self.advance();
-        let ast = self.parse_expr();
+        let ast = self.parse_expr()?;
 
         if self.current_token.is_some() {
-            return Err(AbeError::new("Invalid expression"));
+            return Err(ParseError::new(
+                "Unexpected tokens after parsing was complete",
+                self.position,
+            ));
         }
 
-        Ok(ast.unwrap())
+        Ok(ast)
     }
 
-    pub fn parse(&mut self) -> Result<access_tree::AccessTree, AbeError> {
+    pub fn parse(&mut self) -> Result<access_tree::AccessTree, ParseError> {
         let ast = self.generate_ast()?;
         self.ast_to_access_tree(ast)
     }
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -186,7 +190,7 @@ mod tests {
                     '|',
                     Box::new(AstNode::Variable('b')),
                     Box::new(AstNode::Variable('c')),
-                ),)
+                ),),
             )
         );
     }
@@ -260,6 +264,38 @@ mod tests {
                 '|',
                 Box::new(AstNode::Variable('a')),
                 Box::new(AstNode::Variable('b')),
+            )
+        );
+    }
+
+    #[test]
+    fn test_parser_complex2() {
+        let input = "(A|D)&(B|E)&C&A";
+        let mut parser = AccessTreeParser::new(input);
+        let result = parser.generate_ast().unwrap();
+
+        assert_eq!(
+            result,
+            AstNode::BinaryOp(
+                '&',
+                Box::new(AstNode::BinaryOp(
+                    '&',
+                    Box::new(AstNode::BinaryOp(
+                        '&',
+                        Box::new(AstNode::BinaryOp(
+                            '|',
+                            Box::new(AstNode::Variable('A')),
+                            Box::new(AstNode::Variable('D')),
+                        )),
+                        Box::new(AstNode::BinaryOp(
+                            '|',
+                            Box::new(AstNode::Variable('B')),
+                            Box::new(AstNode::Variable('E')),
+                        )),
+                    )),
+                    Box::new(AstNode::Variable('C',)),
+                )),
+                Box::new(AstNode::Variable('A',))
             )
         );
     }

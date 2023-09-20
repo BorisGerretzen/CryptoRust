@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use rabe_bn::{Fr, Gt, G1, G2};
 use serde::{Deserialize, Serialize};
 
+use crate::abe_attribute::AbeIdentifier;
 use crate::access_tree::AccessTree;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -31,7 +32,7 @@ pub struct AbeCipherText {
     pub access_tree: Box<AccessTree>,
     pub c_0: G1,
     pub c_1: Gt,
-    pub arr_c: HashMap<String, G1>,
+    pub arr_c: HashMap<AbeIdentifier, G1>,
     pub message: Vec<u8>,
 }
 
