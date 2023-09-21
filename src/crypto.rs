@@ -45,6 +45,46 @@ pub fn setup<R: Rng + ?Sized>(
     )
 }
 
+pub fn adapt<R: Rng + ?Sized>(
+    public_key: &AbePublicKey,
+    master_key: &AbeMasterKey,
+    new_attributes: &Vec<String>,
+    rng: &mut R,
+) -> (AbePublicKey, AbeMasterKey) {
+    // Generate random elements for each attribute
+    // tj = random field element
+    let mut small_t = master_key.small_t.clone();
+    for i in 0..new_attributes.len() {
+        small_t.insert(new_attributes[i].clone(), rng.gen());
+    }
+
+    // y=e(g1,g2)^alpha
+    let pair = pairing(public_key.g1, public_key.g2);
+    let y = pair.pow(master_key.alpha);
+
+    // Tj = g^tj
+    let mut big_t = public_key.big_t.clone();
+    for i in 0..new_attributes.len() {
+        big_t.insert(
+            new_attributes[i].clone(),
+            public_key.g1 * small_t[&new_attributes[i]],
+        );
+    }
+
+    (
+        AbePublicKey {
+            map: pair,
+            g1: public_key.g1,
+            g2: public_key.g2,
+            y,
+            big_t,
+        },
+        AbeMasterKey {
+            alpha: master_key.alpha,
+            small_t,
+        },
+    )
+}
 pub fn keygen<R: Rng + ?Sized>(
     attributes: &Vec<String>,
     public_key: &AbePublicKey,
@@ -177,17 +217,6 @@ pub fn decrypt(
             Some(acc) => Some(acc * e),
         })
         .ok_or(AbeError::new("Could not calculate product of e(cj,dj)"))?;
-
-    // e(g,g)^rs = product of e(cj,dj)
-    // let p2 = secret_key
-    //     .arr_d
-    //     .iter()
-    //     .filter(|(name, _)| minimal_set.contains(&AbeAttribute::new(name)))
-    //     .map(|(name, d)| pairing(cipher_text.arr_c[name], *d))
-    //     .fold(None, |acc, e| match acc {
-    //         None => Some(e),
-    //         Some(acc) => Some(acc * e),
-    //     }).ok_or(AbeError::new("Could not calculate product of e(cj,dj)"))?;
 
     // e(g^s,g^a) = e(c0,d0) * e(g,g)^rs
     let egsga = pairing(cipher_text.c_0, secret_key.d_0) * product;

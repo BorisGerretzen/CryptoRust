@@ -7,7 +7,7 @@ use crate::abe_attribute::AbeAttribute;
 use crate::access_tree::TreeOperator::{And, Or};
 use crate::errors::abe_error::AbeError;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Copy)]
 pub enum TreeOperator {
     Or,
     And,
@@ -107,7 +107,7 @@ impl AssignValues for AccessTree {
 
                 AccessTree::Operator(Operator {
                     value: to_set,
-                    operator: operator.clone(),
+                    operator: *operator,
                     left: Box::from(left.assign_values(s, set_left, rng)),
                     right: Box::from(right.assign_values(s, set_right, rng)),
                 })

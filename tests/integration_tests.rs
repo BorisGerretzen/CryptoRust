@@ -2,11 +2,11 @@ use itertools::Itertools;
 use rabe_bn::{Fr, Group, Gt, G1, G2};
 use rand::Rng;
 
-use crypto_rust::abe_attribute::AbeAttribute;
-use crypto_rust::access_tree::TreeOperator::{And, Or};
-use crypto_rust::access_tree::{AccessTree, GetAttributes, Leaf, Operator};
-use crypto_rust::crypto::{decrypt, encrypt, keygen, setup};
-use crypto_rust::parser::AccessTreeParser;
+use abe::abe_attribute::AbeAttribute;
+use abe::access_tree::TreeOperator::{And, Or};
+use abe::access_tree::{AccessTree, GetAttributes, Leaf, Operator};
+use abe::crypto::{decrypt, encrypt, keygen, setup};
+use abe::parser::AccessTreeParser;
 
 fn encrypt_decrypt(tree: &AccessTree, key_attributes: &Vec<AbeAttribute>) {
     let rng = &mut rand::thread_rng();
