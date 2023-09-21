@@ -59,8 +59,7 @@ fn test_original_secret_decrypts_adapted_pk() {
     )
     .unwrap();
 
-    let (adapted_public, adapted_master) =
-        adapt(&public_key, &master_key, &vec!["C".to_string()], rng);
+    let (adapted_public, _) = adapt(&public_key, &master_key, &vec!["C".to_string()], rng);
 
     let cipher_text = encrypt(&secret, &message_bytes, &adapted_public, &tree, rng).unwrap();
     let decrypted = decrypt(&cipher_text, &secret_key).unwrap();
