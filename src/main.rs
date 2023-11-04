@@ -132,7 +132,9 @@ async fn main() {
         .or(mediator_decrypt_route)
         .or(decrypt_route);
 
-    let addr = IpAddr::from_str("::0").unwrap();
+    let addr = IpAddr::from_str("0.0.0.0").unwrap();
+    println!("Listening on http://{:?}:3030", addr);
+
     warp::serve(routes).bind((addr, 3030)).await;
 }
 
