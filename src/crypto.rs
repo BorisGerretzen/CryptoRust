@@ -2,12 +2,11 @@ use std::collections::HashMap;
 
 use rabe_bn::{pairing, Fr, Gt, G1, G2};
 use rand::Rng;
-
 use crate::abe_attribute::{AbeAttribute, AbeIdentifier};
 use crate::access_tree::{AccessTree, AssignValues, GetAttributes, MinimalSetFinder};
 use crate::aes;
 use crate::errors::abe_error::AbeError;
-use crate::models::{AbeCipherText, AbeDecrypted, AbeMasterKey, AbePublicKey, AbeSecretKey};
+use crate::models::{AbeCipherText, AbeClientKey, AbeDecrypted, AbeMasterKey, AbeMediatorKey, AbePublicKey};
 
 pub fn setup<R: Rng + ?Sized>(
     attributes: &Vec<String>,
@@ -85,48 +84,60 @@ pub fn adapt<R: Rng + ?Sized>(
         },
     )
 }
+
 pub fn keygen<R: Rng + ?Sized>(
     attributes: &Vec<String>,
     public_key: &AbePublicKey,
     master_key: &AbeMasterKey,
     rng: &mut R,
-) -> Result<AbeSecretKey, AbeError> {
-    let r = rng.gen();
+) -> Result<(AbeClientKey, AbeMediatorKey), AbeError> {
+    let identifier = rng.gen();
 
-    // d0 = g2^(alpha-r)
-    let d_0 = public_key.g2 * (master_key.alpha - r);
+    // d0 = g2^(alpha-identifer)
+    let d_0 = public_key.g2 * (master_key.alpha - identifier);
 
-    // dj = g2^(r * tj^-1)
-    let arr_d = attributes.iter().map(|a| {
-        let clone = a.clone();
+    let inverses: Vec<(&String, Fr)> = attributes.iter().map(|a| {
         let inverse = master_key.small_t[a].inverse().ok_or(AbeError::new(
             format!("Could not calculate inverse of {}", a).as_str(),
         ));
+
         match inverse {
-            Ok(inverse) => Ok((clone, public_key.g2 * (r * inverse))),
+            Ok(inverse) => Ok((a, inverse)),
             Err(e) => Err(e),
         }
+    }).into_iter().collect()?;
+
+    let randoms: Vec<(&String, Fr)> = attributes.iter().map(|a| {
+        let random = rng.gen();
+        (a, random)
+    }).into_iter().collect()?;
+
+    // dj = g2 ^ uj / tj
+    let arr_d_1 = attributes.iter().map(|a| {
+        let inverse = inverses.iter().find(|x| *x.0 == *a)?.1;
+        let uj = randoms.iter().find(|x| *x.0 == *a)?.1;
+
+        (a.clone(), public_key.g2 * (uj * inverse))
+    })?;
+
+    // dj = g2 ^ (uid - uj) / tj
+    let arr_d_2 = attributes.iter().map(|a| {
+        let inverse = inverses.iter().find(|x| *x.0 == *a)?.1;
+        let uj = randoms.iter().find(|x| *x.0 == *a)?.1;
+
+        (a.clone(), public_key.g2 * ((identifier - uj) * inverse))
     });
 
-    // get errors if any
-    let errors = arr_d
-        .clone()
-        .filter(|d| d.is_err())
-        .map(|d| d.err().unwrap())
-        .collect::<Vec<AbeError>>();
-
-    if errors.len() > 0 {
-        let mut error_message = String::from("Could not calculate dj for attributes: ");
-        for error in errors {
-            error_message.push_str(&format!("{:?}, ", error));
+    Ok((
+        AbeClientKey {
+            unique_secret: identifier,
+            d_0,
+            arr_d_2: arr_d_2.collect::<HashMap<String, G2>>(),
+        },
+        AbeMediatorKey {
+            arr_d_1: arr_d_1.collect::<HashMap<String, G2>>(),
         }
-        return Err(AbeError::new(error_message.as_str()));
-    }
-
-    Ok(AbeSecretKey {
-        d_0,
-        arr_d: arr_d.map(|d| d.unwrap()).collect::<HashMap<String, G2>>(),
-    })
+    ))
 }
 
 pub fn encrypt<R: Rng + ?Sized>(
@@ -192,13 +203,12 @@ pub fn encrypt<R: Rng + ?Sized>(
     })
 }
 
-pub fn decrypt(
+pub fn m_decrypt(
     cipher_text: &AbeCipherText,
-    secret_key: &AbeSecretKey,
-) -> Result<AbeDecrypted, AbeError> {
-    // find minimal set of attributes required to decrypt
+    secret_key: &AbeMediatorKey,
+) -> Result<Gt, AbeError> {
     let original_set = secret_key
-        .arr_d
+        .arr_d_1
         .iter()
         .map(|(name, _)| AbeAttribute::new(name))
         .collect::<Vec<AbeAttribute>>();
@@ -211,17 +221,44 @@ pub fn decrypt(
         .filter(|(identifier, _)| {
             minimal_set.contains(&AbeAttribute::new(identifier.name.as_str()))
         })
-        .map(|(identifier, c)| pairing(*c, secret_key.arr_d[&identifier.name]))
+        .map(|(identifier, c)| pairing(*c, secret_key.arr_d_1[&identifier.name]))
         .fold(None, |acc, e| match acc {
             None => Some(e),
             Some(acc) => Some(acc * e),
         })
         .ok_or(AbeError::new("Could not calculate product of e(cj,dj)"))?;
 
-    // e(g^s,g^a) = e(c0,d0) * e(g,g)^rs
-    let egsga = pairing(cipher_text.c_0, secret_key.d_0) * product;
+    Ok(product)
+}
 
-    // m' = c1 / e(g^s,g^a)
+pub fn decrypt(
+    cipher_text: &AbeCipherText,
+    secret_key: &AbeClientKey,
+    mediated_value: &Gt,
+) -> Result<AbeDecrypted, AbeError> {
+    let original_set = secret_key
+        .arr_d_2
+        .iter()
+        .map(|(name, _)| AbeAttribute::new(name))
+        .collect::<Vec<AbeAttribute>>();
+
+    let minimal_set = cipher_text.access_tree.find_minimal_set(&original_set)?;
+
+    let product = cipher_text
+        .arr_c
+        .iter()
+        .filter(|(identifier, _)| {
+            minimal_set.contains(&AbeAttribute::new(identifier.name.as_str()))
+        })
+        .map(|(identifier, c)| pairing(*c, secret_key.arr_d_2[&identifier.name]))
+        .fold(None, |acc, e| match acc {
+            None => Some(e),
+            Some(acc) => Some(acc * e),
+        })
+        .ok_or(AbeError::new("Could not calculate product of e(cj,dj)"))?;
+
+    let egsga = pairing(cipher_text.c_0, secret_key.d_0) * *mediated_value * product;
+
     let m_prime = cipher_text.c_1 * egsga.inverse();
 
     let message_bytes = aes::decrypt_symmetric(m_prime, &cipher_text.message)?;

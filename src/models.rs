@@ -26,9 +26,21 @@ pub struct AbeMasterKey {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AbeSecretKey {
+pub struct AbeSecretKeyPair {
+    pub client_key: AbeClientKey,
+    pub mediator_key: AbeMediatorKey,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AbeClientKey {
+    pub unique_secret: Fr,
     pub d_0: G2,
-    pub arr_d: HashMap<String, G2>,
+    pub arr_d_2: HashMap<String, G2>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AbeMediatorKey {
+    pub arr_d_1: HashMap<String, G2>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
