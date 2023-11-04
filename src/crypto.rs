@@ -1,12 +1,16 @@
 use std::collections::HashMap;
 
+use linked_hash_map::LinkedHashMap;
 use rabe_bn::{pairing, Fr, Gt, G1, G2};
 use rand::Rng;
+
 use crate::abe_attribute::{AbeAttribute, AbeIdentifier};
 use crate::access_tree::{AccessTree, AssignValues, GetAttributes, MinimalSetFinder};
 use crate::aes;
 use crate::errors::abe_error::AbeError;
-use crate::models::{AbeCipherText, AbeClientKey, AbeDecrypted, AbeMasterKey, AbeMediatorKey, AbePublicKey};
+use crate::models::{
+    AbeCipherText, AbeClientKey, AbeDecrypted, AbeMasterKey, AbeMediatorKey, AbePublicKey,
+};
 
 pub fn setup<R: Rng + ?Sized>(
     attributes: &Vec<String>,
@@ -44,46 +48,46 @@ pub fn setup<R: Rng + ?Sized>(
     )
 }
 
-pub fn adapt<R: Rng + ?Sized>(
-    public_key: &AbePublicKey,
-    master_key: &AbeMasterKey,
-    new_attributes: &Vec<String>,
-    rng: &mut R,
-) -> (AbePublicKey, AbeMasterKey) {
-    // Generate random elements for each attribute
-    // tj = random field element
-    let mut small_t = master_key.small_t.clone();
-    for i in 0..new_attributes.len() {
-        small_t.insert(new_attributes[i].clone(), rng.gen());
-    }
-
-    // y=e(g1,g2)^alpha
-    let pair = pairing(public_key.g1, public_key.g2);
-    let y = pair.pow(master_key.alpha);
-
-    // Tj = g^tj
-    let mut big_t = public_key.big_t.clone();
-    for i in 0..new_attributes.len() {
-        big_t.insert(
-            new_attributes[i].clone(),
-            public_key.g1 * small_t[&new_attributes[i]],
-        );
-    }
-
-    (
-        AbePublicKey {
-            map: pair,
-            g1: public_key.g1,
-            g2: public_key.g2,
-            y,
-            big_t,
-        },
-        AbeMasterKey {
-            alpha: master_key.alpha,
-            small_t,
-        },
-    )
-}
+// pub fn adapt<R: Rng + ?Sized>(
+//     public_key: &AbePublicKey,
+//     master_key: &AbeMasterKey,
+//     new_attributes: &Vec<String>,
+//     rng: &mut R,
+// ) -> (AbePublicKey, AbeMasterKey) {
+//     // Generate random elements for each attribute
+//     // tj = random field element
+//     let mut small_t = master_key.small_t.clone();
+//     for i in 0..new_attributes.len() {
+//         small_t.insert(new_attributes[i].clone(), rng.gen());
+//     }
+//
+//     // y=e(g1,g2)^alpha
+//     let pair = pairing(public_key.g1, public_key.g2);
+//     let y = pair.pow(master_key.alpha);
+//
+//     // Tj = g^tj
+//     let mut big_t = public_key.big_t.clone();
+//     for i in 0..new_attributes.len() {
+//         big_t.insert(
+//             new_attributes[i].clone(),
+//             public_key.g1 * small_t[&new_attributes[i]],
+//         );
+//     }
+//
+//     (
+//         AbePublicKey {
+//             map: pair,
+//             g1: public_key.g1,
+//             g2: public_key.g2,
+//             y,
+//             big_t,
+//         },
+//         AbeMasterKey {
+//             alpha: master_key.alpha,
+//             small_t,
+//         },
+//     )
+// }
 
 pub fn keygen<R: Rng + ?Sized>(
     attributes: &Vec<String>,
@@ -96,47 +100,70 @@ pub fn keygen<R: Rng + ?Sized>(
     // d0 = g2^(alpha-identifer)
     let d_0 = public_key.g2 * (master_key.alpha - identifier);
 
-    let inverses: Vec<(&String, Fr)> = attributes.iter().map(|a| {
+    let mut inverses = Vec::new();
+    for a in attributes {
+        if !master_key.small_t.contains_key(a) {
+            return Err(AbeError::new(
+                format!("Attribute {} not found in master key", a).as_str(),
+            ));
+        }
+
         let inverse = master_key.small_t[a].inverse().ok_or(AbeError::new(
             format!("Could not calculate inverse of {}", a).as_str(),
         ));
 
         match inverse {
-            Ok(inverse) => Ok((a, inverse)),
-            Err(e) => Err(e),
+            Ok(inverse) => inverses.push((a, inverse)),
+            Err(e) => return Err(e),
         }
-    }).into_iter().collect()?;
+    }
 
-    let randoms: Vec<(&String, Fr)> = attributes.iter().map(|a| {
-        let random = rng.gen();
-        (a, random)
-    }).into_iter().collect()?;
+    let randoms: Vec<(&String, Fr)> = attributes
+        .iter()
+        .map(|a| {
+            let random = rng.gen();
+            (a, random)
+        })
+        .collect();
 
     // dj = g2 ^ uj / tj
-    let arr_d_1 = attributes.iter().map(|a| {
-        let inverse = inverses.iter().find(|x| *x.0 == *a)?.1;
-        let uj = randoms.iter().find(|x| *x.0 == *a)?.1;
-
-        (a.clone(), public_key.g2 * (uj * inverse))
-    })?;
+    let mut arr_d_1 = Vec::new();
 
     // dj = g2 ^ (uid - uj) / tj
-    let arr_d_2 = attributes.iter().map(|a| {
-        let inverse = inverses.iter().find(|x| *x.0 == *a)?.1;
-        let uj = randoms.iter().find(|x| *x.0 == *a)?.1;
+    let mut arr_d_2 = Vec::new();
 
-        (a.clone(), public_key.g2 * ((identifier - uj) * inverse))
-    });
+    for a in attributes {
+        let inverse = inverses
+            .iter()
+            .find(|x| *x.0 == *a)
+            .ok_or(AbeError::new(
+                format!("Could not find inverse for {}", a).as_str(),
+            ))?
+            .1;
+        let uj = randoms
+            .iter()
+            .find(|x| *x.0 == *a)
+            .ok_or(AbeError::new(
+                format!("Could not find random for {}", a).as_str(),
+            ))?
+            .1;
+
+        let val1 = (a.clone(), public_key.g2 * (uj * inverse));
+        let val2 = (a.clone(), public_key.g2 * ((identifier - uj) * inverse));
+
+        arr_d_1.push(val1);
+        arr_d_2.push(val2);
+    }
 
     Ok((
         AbeClientKey {
             unique_secret: identifier,
             d_0,
-            arr_d_2: arr_d_2.collect::<HashMap<String, G2>>(),
+            arr_d_2: arr_d_2.into_iter().collect::<LinkedHashMap<String, G2>>(),
         },
         AbeMediatorKey {
-            arr_d_1: arr_d_1.collect::<HashMap<String, G2>>(),
-        }
+            arr_d_1: arr_d_1.into_iter().collect::<LinkedHashMap<String, G2>>(),
+        },
     ))
 }
 
@@ -157,6 +184,9 @@ pub fn encrypt<R: Rng + ?Sized>(
     let c_1 = *secret * public_key.y.pow(s);
 
     // assign values to the tree according to scheme
+    let mut plain_tree = access_tree.clone();
+    plain_tree.assign_indices();
+
     let mut filled_tree = access_tree.assign_values(s, None, rng);
     filled_tree.assign_indices();
 
@@ -203,10 +233,7 @@ pub fn encrypt<R: Rng + ?Sized>(
     })
 }
 
-pub fn m_decrypt(
-    cipher_text: &AbeCipherText,
-    secret_key: &AbeMediatorKey,
-) -> Result<Gt, AbeError> {
+pub fn m_decrypt(cipher_text: &AbeCipherText, secret_key: &AbeMediatorKey) -> Result<Gt, AbeError> {
     let original_set = secret_key
         .arr_d_1
         .iter()
@@ -260,7 +287,6 @@ pub fn decrypt(
     let egsga = pairing(cipher_text.c_0, secret_key.d_0) * *mediated_value * product;
 
     let m_prime = cipher_text.c_1 * egsga.inverse();
-
     let message_bytes = aes::decrypt_symmetric(m_prime, &cipher_text.message)?;
 
     Ok(AbeDecrypted {

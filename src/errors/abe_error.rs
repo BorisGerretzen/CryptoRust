@@ -3,7 +3,7 @@ use std::fmt::{Display, Formatter};
 use crate::errors::parse_error::ParseError;
 use crate::errors::symmetric_encryption_error::SymmetricEncryptionError;
 
-#[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Serialize)]
 pub struct AbeError {
     pub message: String,
 }

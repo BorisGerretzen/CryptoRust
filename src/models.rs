@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use base64::engine::general_purpose::STANDARD;
 use base64_serde::base64_serde_type;
+use linked_hash_map::LinkedHashMap;
 use rabe_bn::{Fr, Gt, G1, G2};
 use serde::{Deserialize, Serialize};
 
@@ -35,12 +36,12 @@ pub struct AbeSecretKeyPair {
 pub struct AbeClientKey {
     pub unique_secret: Fr,
     pub d_0: G2,
-    pub arr_d_2: HashMap<String, G2>,
+    pub arr_d_2: LinkedHashMap<String, G2>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AbeMediatorKey {
-    pub arr_d_1: HashMap<String, G2>,
+    pub arr_d_1: LinkedHashMap<String, G2>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -53,6 +54,7 @@ pub struct AbeCipherText {
     pub message: Vec<u8>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AbeDecrypted {
     pub message: Vec<u8>,
     pub secret: Gt,

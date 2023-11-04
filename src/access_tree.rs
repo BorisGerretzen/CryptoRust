@@ -159,7 +159,6 @@ impl MinimalSetFinder for AccessTree {
     ) -> Result<Vec<AbeAttribute>, AbeError> {
         // If initial set does not satisfy we immediately return
         if !self.is_satisfiable(attributes) {
-            println!("{:#?} {:#?}", self, attributes);
             return Err(AbeError::new(
                 "Initial attribute set does not satisfy the tree",
             ));
