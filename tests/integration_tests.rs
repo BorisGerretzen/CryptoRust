@@ -5,7 +5,7 @@ use rand::Rng;
 use abe::abe_attribute::AbeAttribute;
 use abe::access_tree::TreeOperator::{And, Or};
 use abe::access_tree::{AccessTree, GetAttributes, Leaf, Operator};
-use abe::crypto::{decrypt, encrypt, keygen, setup};
+use abe::crypto::{decrypt, encrypt, keygen, m_decrypt, setup};
 use abe::parser::AccessTreeParser;
 
 fn encrypt_decrypt(tree: &AccessTree, key_attributes: &Vec<AbeAttribute>) {
@@ -23,7 +23,7 @@ fn encrypt_decrypt(tree: &AccessTree, key_attributes: &Vec<AbeAttribute>) {
 
     let (public_key, master_key) = setup(&attributes, G1::one(), G2::one(), rng);
 
-    let secret_key = keygen(
+    let (secret_key, m_secret) = keygen(
         &key_attributes.iter().map(|a| a.name.clone()).collect(),
         &public_key,
         &master_key,
@@ -31,8 +31,8 @@ fn encrypt_decrypt(tree: &AccessTree, key_attributes: &Vec<AbeAttribute>) {
     )
     .unwrap();
     let cipher_text = encrypt(&secret, &message_bytes, &public_key, &tree, rng).unwrap();
-
-    let decrypted = decrypt(&cipher_text, &secret_key).unwrap();
+    let mediated_value = m_decrypt(&cipher_text, &m_secret).unwrap();
+    let decrypted = decrypt(&cipher_text, &secret_key, &mediated_value).unwrap();
 
     assert_eq!(secret, decrypted.secret);
     assert_eq!(message_bytes, decrypted.message);
