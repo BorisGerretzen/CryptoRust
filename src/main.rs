@@ -35,6 +35,8 @@ fn setup(attributes: &String) -> Result<AbePublicMasterKeypair, AbeError> {
         .split(",")
         .map(|s| s.to_string())
         .collect_vec();
+
+    println!("Setup with attributes: {:?}", attributes);
     let (public, master) = crypto::setup(&attributes, G1::one(), G2::one(), rng);
     Ok(AbePublicMasterKeypair {
         public_key: public,
@@ -43,6 +45,8 @@ fn setup(attributes: &String) -> Result<AbePublicMasterKeypair, AbeError> {
 }
 
 fn keygen(params: &AbeKeygenParams) -> Result<AbeSecretKeyPair, AbeError> {
+    println!("Generating keys for attributes: {:?}", params.attributes);
+
     let rng = &mut rand::thread_rng();
     let (client_key, mediator_key) = crypto::keygen(
         &params.attributes,
@@ -57,6 +61,10 @@ fn keygen(params: &AbeKeygenParams) -> Result<AbeSecretKeyPair, AbeError> {
 }
 
 fn encrypt(params: &AbeEncryptParams) -> Result<AbeCipherText, AbeError> {
+    println!(
+        "Encrypting message: {:?} with policy {:?}",
+        params.message, params.access_policy
+    );
     let rng = &mut rand::thread_rng();
     let access_policy = AccessTreeParser::new(&params.access_policy).parse()?;
     let bytes = params.message.as_bytes().to_vec();
@@ -66,11 +74,19 @@ fn encrypt(params: &AbeEncryptParams) -> Result<AbeCipherText, AbeError> {
 }
 
 fn mediator_decrypt(params: &AbeMediatorDecryptParams) -> Result<Gt, AbeError> {
+    println!(
+        "Mediator decrypt for {} byte ciphertext",
+        params.cipher_text.message.len()
+    );
     let mediated_value = crypto::m_decrypt(&params.cipher_text, &params.secret_key)?;
     Ok(mediated_value)
 }
 
 fn decrypt(params: &AbeDecryptParams) -> Result<String, AbeError> {
+    println!(
+        "Decrypting {} byte ciphertext",
+        params.cipher_text.message.len()
+    );
     let decrypted = crypto::decrypt(
         &params.cipher_text,
         &params.secret_key,
@@ -129,10 +145,13 @@ where
             Box::new(warp::reply::json(&data)),
             warp::http::StatusCode::OK,
         ),
-        Err(e) => warp::reply::with_status(
-            Box::new(e.message),
-            warp::http::StatusCode::INTERNAL_SERVER_ERROR,
-        ),
+        Err(e) => {
+            println!("Error: {:?}", e.message);
+            warp::reply::with_status(
+                Box::new(e.message),
+                warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        }
     }
 }
 
