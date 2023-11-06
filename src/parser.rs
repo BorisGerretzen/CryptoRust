@@ -2,9 +2,9 @@ use crate::abe_attribute::AbeAttribute;
 use crate::access_tree;
 use crate::errors::parse_error::ParseError;
 
-#[derive(Debug, Clone, PartialEq, Copy)]
+#[derive(Debug, Clone, PartialEq)]
 enum Token {
-    Variable(char),
+    Variable(String),
     And,
     Or,
     OpenParen,
@@ -13,7 +13,7 @@ enum Token {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum AstNode {
-    Variable(char),
+    Variable(String),
     BinaryOp(char, Box<AstNode>, Box<AstNode>),
 }
 
@@ -27,17 +27,33 @@ impl AccessTreeParser {
     pub fn new(input: &str) -> AccessTreeParser {
         // simple lexer
         let mut tokens = Vec::new();
+        let mut accumulator = String::new();
+
         for c in input.chars() {
-            match c {
-                'a'..='z' | 'A'..='Z' => tokens.push(Token::Variable(c)),
-                '&' => tokens.push(Token::And),
-                '|' => tokens.push(Token::Or),
-                '(' => tokens.push(Token::OpenParen),
-                ')' => tokens.push(Token::CloseParen),
-                _ => {}
+            let token = match c {
+                '&' => Some(Token::And),
+                '|' => Some(Token::Or),
+                '(' => Some(Token::OpenParen),
+                ')' => Some(Token::CloseParen),
+                _ => {
+                    accumulator.push(c);
+                    None
+                }
+            };
+
+            if let Some(token) = token {
+                if accumulator.len() > 0 {
+                    tokens.push(Token::Variable(accumulator.clone()));
+                    accumulator.clear();
+                }
+                tokens.push(token);
             }
         }
+        if accumulator.len() > 0 {
+            tokens.push(Token::Variable(accumulator.clone()));
+        }
 
+        println!("Tokens: {:?}", tokens);
         AccessTreeParser {
             tokens,
             current_token: None,
@@ -55,9 +71,10 @@ impl AccessTreeParser {
     }
 
     fn parse_variable(&mut self) -> Result<AstNode, ParseError> {
-        match self.current_token {
+        let node = self.current_token.clone();
+        match node {
             Some(Token::Variable(c)) => {
-                self.advance();
+                &mut self.advance();
                 Ok(AstNode::Variable(c))
             }
             Some(token) => Err(ParseError::new(
@@ -156,6 +173,12 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_longer_names() {
+        let input = "patient|doctor";
+        let mut parser = AccessTreeParser::new(input);
+    }
+
+    #[test]
     fn test_parser() {
         let input = "a&b|c";
         let mut parser = AccessTreeParser::new(input);
@@ -167,10 +190,10 @@ mod tests {
                 '|',
                 Box::new(AstNode::BinaryOp(
                     '&',
-                    Box::new(AstNode::Variable('a')),
-                    Box::new(AstNode::Variable('b')),
+                    Box::new(AstNode::Variable(String::from('a'))),
+                    Box::new(AstNode::Variable(String::from('b'))),
                 )),
-                Box::new(AstNode::Variable('c')),
+                Box::new(AstNode::Variable(String::from('c'))),
             )
         );
     }
@@ -185,11 +208,11 @@ mod tests {
             result,
             AstNode::BinaryOp(
                 '&',
-                Box::new(AstNode::Variable('a')),
+                Box::new(AstNode::Variable(String::from('a'))),
                 Box::new(AstNode::BinaryOp(
                     '|',
-                    Box::new(AstNode::Variable('b')),
-                    Box::new(AstNode::Variable('c')),
+                    Box::new(AstNode::Variable(String::from('b'))),
+                    Box::new(AstNode::Variable(String::from('c'))),
                 ),),
             )
         );
@@ -205,8 +228,8 @@ mod tests {
             result,
             AstNode::BinaryOp(
                 '|',
-                Box::new(AstNode::Variable('a')),
-                Box::new(AstNode::Variable('b')),
+                Box::new(AstNode::Variable(String::from('a'))),
+                Box::new(AstNode::Variable(String::from('b'))),
             )
         );
     }
@@ -221,8 +244,8 @@ mod tests {
             result,
             AstNode::BinaryOp(
                 '&',
-                Box::new(AstNode::Variable('a')),
-                Box::new(AstNode::Variable('b')),
+                Box::new(AstNode::Variable(String::from('a'))),
+                Box::new(AstNode::Variable(String::from('b'))),
             )
         );
     }
@@ -233,7 +256,7 @@ mod tests {
         let mut parser = AccessTreeParser::new(input);
         let result = parser.generate_ast().unwrap();
 
-        assert_eq!(result, AstNode::Variable('a'));
+        assert_eq!(result, AstNode::Variable(String::from('a')));
     }
 
     #[test]
@@ -246,8 +269,8 @@ mod tests {
             result,
             AstNode::BinaryOp(
                 '&',
-                Box::new(AstNode::Variable('a')),
-                Box::new(AstNode::Variable('b')),
+                Box::new(AstNode::Variable(String::from('a'))),
+                Box::new(AstNode::Variable(String::from('b'))),
             )
         );
     }
@@ -262,8 +285,8 @@ mod tests {
             result,
             AstNode::BinaryOp(
                 '|',
-                Box::new(AstNode::Variable('a')),
-                Box::new(AstNode::Variable('b')),
+                Box::new(AstNode::Variable(String::from('a'))),
+                Box::new(AstNode::Variable(String::from('b'))),
             )
         );
     }
@@ -284,18 +307,18 @@ mod tests {
                         '&',
                         Box::new(AstNode::BinaryOp(
                             '|',
-                            Box::new(AstNode::Variable('A')),
-                            Box::new(AstNode::Variable('D')),
+                            Box::new(AstNode::Variable(String::from('A'))),
+                            Box::new(AstNode::Variable(String::from('D'))),
                         )),
                         Box::new(AstNode::BinaryOp(
                             '|',
-                            Box::new(AstNode::Variable('B')),
-                            Box::new(AstNode::Variable('E')),
+                            Box::new(AstNode::Variable(String::from('B'))),
+                            Box::new(AstNode::Variable(String::from('E'))),
                         )),
                     )),
-                    Box::new(AstNode::Variable('C',)),
+                    Box::new(AstNode::Variable(String::from('C'))),
                 )),
-                Box::new(AstNode::Variable('A',))
+                Box::new(AstNode::Variable(String::from('A')))
             )
         );
     }
