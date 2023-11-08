@@ -74,7 +74,7 @@ impl AccessTreeParser {
         let node = self.current_token.clone();
         match node {
             Some(Token::Variable(c)) => {
-                &mut self.advance();
+                self.advance();
                 Ok(AstNode::Variable(c))
             }
             Some(token) => Err(ParseError::new(
@@ -176,6 +176,16 @@ mod tests {
     fn test_longer_names() {
         let input = "patient|doctor";
         let mut parser = AccessTreeParser::new(input);
+        let result = parser.generate_ast().unwrap();
+
+        assert_eq!(
+            result,
+            AstNode::BinaryOp(
+                '|',
+                Box::new(AstNode::Variable(String::from("patient"))),
+                Box::new(AstNode::Variable(String::from("doctor"))),
+            )
+        );
     }
 
     #[test]
