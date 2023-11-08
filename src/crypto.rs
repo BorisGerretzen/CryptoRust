@@ -223,7 +223,7 @@ pub fn encrypt<R: Rng + ?Sized>(
     let message = aes::encrypt_symmetric(*secret, message)?;
 
     Ok(AbeCipherText {
-        access_tree: Box::new(filled_tree),
+        access_tree: Box::new(plain_tree),
         c_0,
         c_1,
         arr_c: c_j
